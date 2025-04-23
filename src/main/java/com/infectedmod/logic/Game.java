@@ -2,14 +2,17 @@
 package com.infectedmod.logic;
 
 import com.infectedmod.InfectedMod;
+import com.infectedmod.ui.ScoreboardManager;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.Scoreboard;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -24,7 +27,7 @@ import java.util.*;
 @Mod.EventBusSubscriber(modid = InfectedMod.MODID)
 public class Game {
     private static final int INTERMISSION_TICKS    = 30 * 20;
-    private static final int GAME_TICKS           = 10 * 60 * 20;
+    public static final int GAME_TICKS           = 10 * 60 * 20;
     private static final int SURVIVOR_POINT_INTERVAL = 60 * 20;
     private static final int SURVIVOR_POINT       = 25;
     private static final int SURVIVOR_XP          = 50;
@@ -34,33 +37,43 @@ public class Game {
     private static final int BONUS_SURVIVOR_XP    = 500;
     private static final int BONUS_INFECT_POINT   = 50;
     private static final int BONUS_INFECT_XP      = 200;
-
+    // inside your Game class, alongside INTERMISSION_TICKS, GAME_TICKS...
+    private static final int POST_INTERMISSION_TICKS = 20 * 20;  // 20s
+    private boolean postGamePhase = false;
+    private MapManager.MapData nextMap = null;
     private static Game instance;
     private final Set<UUID> survivors = new HashSet<>();
     private final Set<UUID> infected  = new HashSet<>();
     private final Map<UUID, PlayerStats> stats = new HashMap<>();
     private MapManager.MapData currentMap;
+
+
+
     private int  tickCounter = 0;
     private boolean intermission = false;
     private boolean running      = false;
-
+    Scoreboard sb;
+    PlayerTeam sTeam;
+    PlayerTeam iTeam;
     public boolean isRunning()        { return running; }
     public MapManager.MapData getCurrentMap()    { return currentMap; }
     private Game() { }
-    private long gameTimer        = 0L;
     public static Game get() {
         if (instance == null) {
             instance = new Game();
         }
         return instance;
     }
-
+    public Set<UUID> getSurvivors() { return survivors; }
+    public Set<UUID> getInfected() { return infected; }
     public void startIntermission(MinecraftServer server) {
         // Reset state
         survivors.clear();
         infected.clear();
         stats.clear();
-
+        sb     = server.overworld().getScoreboard();
+        sTeam  = sb.getPlayersTeam("Survivors");
+        iTeam  = sb.getPlayersTeam("Infected");
         PlayerList list = server.getPlayerList();
         // Add all online players as survivors
         list.getPlayers().forEach(p -> {
@@ -87,8 +100,18 @@ public class Game {
 
         if (game.intermission) {
             game.tickCounter++;
-            if (game.tickCounter >= INTERMISSION_TICKS) {
-                game.startGame(server);
+            int duration = game.postGamePhase
+                    ? POST_INTERMISSION_TICKS
+                    : INTERMISSION_TICKS;
+            if (game.tickCounter >= duration) {
+                if (game.postGamePhase) {
+                    // switch out of post-game into a fresh round
+                    game.postGamePhase = false;
+                    game.startGame(server);
+                } else {
+                    // initial intermission → first game
+                    game.startGame(server);
+                }
             }
         }
         else if (game.running) {
@@ -109,7 +132,22 @@ public class Game {
 
     public void startGame(MinecraftServer server) {
         // 1) Grab a random map (Optional<MapData> → handle empty)
+
+        sTeam.setColor(ChatFormatting.GREEN);
+        iTeam.setColor(ChatFormatting.RED);
+
         Optional<MapManager.MapData> optMap = MapManager.get().getRandomMap();
+        if (nextMap != null) {
+            currentMap = nextMap;
+            nextMap = null;
+        } else {
+            Optional<MapManager.MapData> opt = MapManager.get().getRandomMap();
+            if (opt.isEmpty()) {
+                // …no maps defined…
+                return;
+            }
+            currentMap = opt.get();
+        }
         if (optMap.isEmpty()) {
             // no maps defined → notify everyone
             for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -121,6 +159,11 @@ public class Game {
             return;
         }
         currentMap = optMap.get();
+        sb.getTeamNames().forEach(sb::removePlayerFromTeam);  // clear all
+        for (UUID id : survivors) {
+            ServerPlayer p = server.getPlayerList().getPlayer(id);
+            if (p != null) sb.addPlayerToTeam(p.getScoreboardName(), sTeam);
+        }
 
         // 2) Reset state
         tickCounter  = 0;
@@ -207,6 +250,8 @@ public class Game {
         survivors.remove(id);
         infected.add(id);
         stats.putIfAbsent(id, new PlayerStats());
+        sb.removePlayerFromTeam(target.getScoreboardName());
+        sb.addPlayerToTeam(target.getScoreboardName(), iTeam);
 
         if (by != null) {
             PlayerStats ps = stats.get(by.getUUID());
@@ -235,6 +280,7 @@ public class Game {
     private void endGame(boolean survivorsWin, MinecraftServer server) {
         running = false;
         String winner = survivorsWin ? "Survivors" : "Infected";
+        ScoreboardManager.announceWinner(server, survivorsWin);
 
         // Announce winner
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -247,9 +293,41 @@ public class Game {
             ps.addPoints(survivorsWin ? BONUS_SURVIVOR_POINT : BONUS_INFECT_POINT);
             ps.addXp(survivorsWin ? BONUS_SURVIVOR_XP : BONUS_INFECT_XP);
         }
+
+        intermission    = true;
+        postGamePhase   = true;
+        tickCounter     = 0;
+
+        Optional<MapManager.MapData> optNext = MapManager.get().getRandomMap();
+        if (optNext.isPresent()) {
+            nextMap = optNext.get();
+            String nm = nextMap.name;
+            // Broadcast "Next map: nm" to everyone
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                p.connection.send(new ClientboundSystemChatPacket(
+                        Component.literal("Next map ➜ " + nm),
+                        false
+                ));
+            }
+        } else {
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                p.connection.send(new ClientboundSystemChatPacket(
+                        Component.literal("No maps defined for next round!"),
+                        false
+                ));
+            }
+        }
+        // Inform players
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            p.connection.send(new ClientboundSystemChatPacket(
+                    Component.literal("Next round begins in 20 seconds!"),
+                    false
+            ));
+        }
+        PlayerStatsManager.get().save();
     }
 
-    private static class PlayerStats {
+    public static class PlayerStats {
         private int points = 0;
         private int xp     = 0;
 
@@ -257,5 +335,41 @@ public class Game {
         public void addXp(int x)     { xp     += x; }
         public int getPoints()       { return points; }
         public int getXp()           { return xp; }
+    }
+
+    public boolean isPostGamePhase() {
+        return postGamePhase;
+    }
+
+    public MapManager.MapData getNextMap() {
+        return nextMap;
+    }
+
+    public static Game getInstance() {
+        return instance;
+    }
+
+    public Map<UUID, PlayerStats> getStats() {
+        return stats;
+    }
+
+    public int getTickCounter() {
+        return tickCounter;
+    }
+
+    public boolean isIntermission() {
+        return intermission;
+    }
+
+    public Scoreboard getSb() {
+        return sb;
+    }
+
+    public PlayerTeam getsTeam() {
+        return sTeam;
+    }
+
+    public PlayerTeam getiTeam() {
+        return iTeam;
     }
 }
