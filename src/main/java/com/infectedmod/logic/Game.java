@@ -2,15 +2,22 @@
 package com.infectedmod.logic;
 
 import com.infectedmod.InfectedMod;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 import java.util.*;
 
@@ -32,13 +39,15 @@ public class Game {
     private final Set<UUID> survivors = new HashSet<>();
     private final Set<UUID> infected  = new HashSet<>();
     private final Map<UUID, PlayerStats> stats = new HashMap<>();
-
+    private MapManager.MapData currentMap;
     private int  tickCounter = 0;
     private boolean intermission = false;
     private boolean running      = false;
 
+    public boolean isRunning()        { return running; }
+    public MapManager.MapData getCurrentMap()    { return currentMap; }
     private Game() { }
-
+    private long gameTimer        = 0L;
     public static Game get() {
         if (instance == null) {
             instance = new Game();
@@ -97,27 +106,79 @@ public class Game {
         }
     }
 
-    private void startGame(MinecraftServer server) {
+
+    public void startGame(MinecraftServer server) {
+        // 1) Grab a random map (Optional<MapData> → handle empty)
+        Optional<MapManager.MapData> optMap = MapManager.get().getRandomMap();
+        if (optMap.isEmpty()) {
+            // no maps defined → notify everyone
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                p.connection.send(new ClientboundSystemChatPacket(
+                        Component.literal("[InfectedMod] No maps defined! Use /addMap first."),
+                        false
+                ));
+            }
+            return;
+        }
+        currentMap = optMap.get();
+
+        // 2) Reset state
+        tickCounter  = 0;
         intermission = false;
         running      = true;
-        tickCounter  = 0;
+        survivors.clear();
+        infected.clear();
 
-        // Choose first infected
+        // 3) Teleport everyone to the map's spawn, init survivors and stats
+        BlockPos spawn = currentMap.spawn;
+        double sx = spawn.getX() + 0.5;
+        double sy = spawn.getY() + 0.5;
+        double sz = spawn.getZ() + 0.5;
+
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            UUID id = p.getUUID();
+            survivors.add(id);
+            stats.putIfAbsent(id, new PlayerStats());
+
+            // Use the connection.teleport(...) method:
+            ServerGamePacketListenerImpl conn = p.connection;
+            conn.teleport(sx, sy, sz, p.getYRot(), p.getXRot());
+        }
+
+        // 4) Pick and announce the first infected
         List<UUID> list = new ArrayList<>(survivors);
-        UUID first = list.get(new Random().nextInt(list.size()));
-        survivors.remove(first);
-        infected.add(first);
-        stats.putIfAbsent(first, new PlayerStats());
+        if (!list.isEmpty()) {
+            UUID firstId = list.get(new Random().nextInt(list.size()));
+            survivors.remove(firstId);
+            infected.add(firstId);
 
-        ServerPlayer sp = server.getPlayerList().getPlayer(first);
-        if (sp != null) {
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.sendSystemMessage(
-                    Component.literal(sp.getName().getString() + " is the first infected!")
-            );
+            ServerPlayer firstPlayer = server.getPlayerList().getPlayer(firstId);
+            if (firstPlayer != null) {
+                // Teleport them as well (optional, same spawn)
+                firstPlayer.connection.teleport(sx, sy, sz, firstPlayer.getYRot(), firstPlayer.getXRot());
+
+                // Broadcast the “first infected” message
+                String msg = firstPlayer.getName().getString() + " is the first infected!";
+                for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                    p.connection.send(new ClientboundSystemChatPacket(
+                            Component.literal(msg),
+                            false
+                    ));
+                }
             }
         }
+
+        // 5) Announce round start
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            p.connection.send(new ClientboundSystemChatPacket(
+                    Component.literal("Round started! 10 minutes on the clock."),
+                    false
+            ));
+        }
     }
+
+
+
 
     @SubscribeEvent
     public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
