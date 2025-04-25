@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.scores.*;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import net.minecraft.world.scores.DisplaySlot;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -17,7 +18,7 @@ import net.minecraftforge.fml.common.Mod;
 
 import java.util.*;
 
-@Mod.EventBusSubscriber(modid = InfectedMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
+@Mod.EventBusSubscriber(modid = InfectedMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.DEDICATED_SERVER)
 public class ScoreboardManager {
     private static final String OBJ_NAME      = "InfectedHUD";
     private static final Component OBJ_TITLE = Component.literal("Infected Mod");
@@ -47,9 +48,18 @@ public class ScoreboardManager {
         sb.setDisplayObjective(DisplaySlot.SIDEBAR, sidebarObj);
 
         // TAB teams
-        survivorsTeam = sb.getPlayersTeam("Survivors");
-        infectedTeam  = sb.getPlayersTeam("Infected");
+
+        survivorsTeam = sb.getPlayerTeam("Survivors");
+        if (survivorsTeam == null) {
+            survivorsTeam = sb.addPlayerTeam("Survivors");
+        }
         survivorsTeam.setColor(ChatFormatting.GREEN);
+
+        // Get or create the Infected team
+        infectedTeam = sb.getPlayerTeam("Infected");
+        if (infectedTeam == null) {
+            infectedTeam = sb.addPlayerTeam("Infected");
+        }
         infectedTeam.setColor(ChatFormatting.RED);
     }
 
