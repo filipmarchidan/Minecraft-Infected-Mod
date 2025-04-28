@@ -161,7 +161,6 @@ public class InfectedMod {
     private void onCommonSetup(final FMLCommonSetupEvent event) {
         // Defer work to the main thread
         event.enqueueWork(() -> {
-            // Pre-load your JSON-backed managers so they’re ready on server start
             MapManager.get();
             PlayerStatsManager.get();
         });

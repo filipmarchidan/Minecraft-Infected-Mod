@@ -63,6 +63,52 @@ public class ScoreboardManager {
         infectedTeam.setColor(ChatFormatting.RED);
     }
 
+    /** Assign this player to the Survivors team (lazy‐init teams). */
+    public static void assignSurvivor(ServerPlayer player) {
+        Scoreboard sb = getSb(player);
+        initTeams(sb);
+        removeFromAnyTeam(player, sb);
+        sb.addPlayerToTeam(player.getScoreboardName(), survivorsTeam);
+    }
+
+    /** Assign this player to the Infected team (lazy‐init teams). */
+    public static void assignInfected(ServerPlayer player) {
+        Scoreboard sb = getSb(player);
+        initTeams(sb);
+        removeFromAnyTeam(player, sb);
+        sb.addPlayerToTeam(player.getScoreboardName(), infectedTeam);
+    }
+
+    /** Get the overworld scoreboard from this player’s dimension (always OVERWORLD). */
+    private static Scoreboard getSb(ServerPlayer player) {
+        MinecraftServer server = player.getServer();
+        // NOTE: .overworld().getScoreboard() or player.level().getScoreboard()
+        return server.overworld().getScoreboard();
+    }
+
+    /** Ensure teams exist and are colored. */
+    private static void initTeams(Scoreboard sb) {
+        if (survivorsTeam == null) {
+            survivorsTeam = sb.getPlayerTeam("Survivors");
+            if (survivorsTeam == null) survivorsTeam = sb.addPlayerTeam("Survivors");
+            survivorsTeam.setColor(ChatFormatting.GREEN);
+        }
+        if (infectedTeam == null) {
+            infectedTeam = sb.getPlayerTeam("Infected");
+            if (infectedTeam == null) infectedTeam = sb.addPlayerTeam("Infected");
+            infectedTeam.setColor(ChatFormatting.RED);
+        }
+    }
+
+    /** Safely remove the player from whichever team they’re currently on (if any). */
+    private static void removeFromAnyTeam(ServerPlayer player, Scoreboard sb) {
+        String name = player.getScoreboardName();
+        PlayerTeam current = sb.getPlayersTeam(name);
+        if (current != null) {
+            // The signature is removePlayerFromTeam(String, PlayerTeam)
+            sb.removePlayerFromTeam(name, current);
+        }
+    }
     // 2) Each server tick, update sidebar lines & reassign teams
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent ev) {
@@ -95,24 +141,6 @@ public class ScoreboardManager {
 
         }
 
-//        // New HUD lines
-//        Map<String, Integer> lines = new LinkedHashMap<>();
-//        lines.put("Points: TBD", 5);
-//        lines.put("XP:     TBD", 4);
-//
-//        if (game.isRunning()) {
-//            long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
-//            long sec = ticksLeft / 20;
-//            String time = String.format("%02d:%02d", sec/60, sec%60);
-//
-//            lines.put("Survivors: " + game.getSurvivors().size(), 3);
-//            lines.put("Infected:  " + game.getInfected().size(), 2);
-//            lines.put("Time:      " + time,                      1);
-//        }
-//
-//        for (var entry : lines.entrySet()) {
-//            sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(entry.getKey()), sidebarObj)
-//                    .set(entry.getValue());
 //        }
         for (String key : oldScoreKeys) {
             sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);

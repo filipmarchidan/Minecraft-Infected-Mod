@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraftforge.event.TickEvent;
@@ -27,7 +28,7 @@ import java.util.*;
 
 @Mod.EventBusSubscriber(modid = InfectedMod.MODID)
 public class Game {
-    private static final int INTERMISSION_TICKS    = 30 * 20;
+    private static final int INTERMISSION_TICKS    = 30 * 10;
     public static final int GAME_TICKS           = 10 * 60 * 20;
     private static final int SURVIVOR_POINT_INTERVAL = 60 * 20;
     private static final int SURVIVOR_POINT       = 25;
@@ -43,15 +44,15 @@ public class Game {
     private boolean postGamePhase = false;
     private MapManager.MapData nextMap = null;
     private static Game instance;
-    private final Set<UUID> survivors = new HashSet<>();
-    private final Set<UUID> infected  = new HashSet<>();
+    private  final Set<UUID> survivors = new HashSet<>();
+    private  final Set<UUID> infected  = new HashSet<>();
     private final Map<UUID, PlayerStats> stats = new HashMap<>();
     private MapManager.MapData currentMap;
 
 
 
     private int  tickCounter = 0;
-    private boolean intermission = false;
+    private volatile boolean intermission = false;
     private boolean running      = false;
     Scoreboard sb;
     PlayerTeam sTeam;
@@ -70,20 +71,7 @@ public class Game {
     public void startIntermission(MinecraftServer server) {
         // Reset state
 
-        BlockPos spawn = currentMap.spawn;
-        double sx = spawn.getX() + 0.5;
-        double sy = spawn.getY() + 0.5;
-        double sz = spawn.getZ() + 0.5;
 
-        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-            UUID id = p.getUUID();
-            survivors.add(id);
-            stats.putIfAbsent(id, new PlayerStats());
-
-            // Use the connection.teleport(...) method:
-            ServerGamePacketListenerImpl conn = p.connection;
-            conn.teleport(sx, sy, sz, p.getYRot(), p.getXRot());
-        }
 
 
         survivors.clear();
@@ -108,6 +96,48 @@ public class Game {
             player.connection.send(new ClientboundSystemChatPacket(Component.literal("Intermission started! Run and hide"), false));
         }
 
+        // 1) Grab a random map (Optional<MapData> → handle empty)
+
+
+        Optional<MapManager.MapData> optMap = MapManager.get().getRandomMap();
+        if (nextMap != null) {
+            currentMap = nextMap;
+            nextMap = null;
+        } else {
+            Optional<MapManager.MapData> opt = MapManager.get().getRandomMap();
+            if (opt.isEmpty()) {
+                // …no maps defined…
+                return;
+            }
+            currentMap = opt.get();
+        }
+        if (optMap.isEmpty()) {
+            // no maps defined → notify everyone
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                p.connection.send(new ClientboundSystemChatPacket(
+                        Component.literal("[InfectedMod] No maps defined! Use /addMap first."),
+                        false
+                ));
+            }
+            return;
+        }
+        currentMap = optMap.get();
+        // 3) Teleport everyone to the map's spawn, init survivors and stats
+        BlockPos spawn = currentMap.spawn;
+        double sx = spawn.getX() + 0.5;
+        double sy = spawn.getY() + 0.5;
+        double sz = spawn.getZ() + 0.5;
+
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            UUID id = p.getUUID();
+            survivors.add(id);
+            stats.putIfAbsent(id, new PlayerStats());
+
+            // Use the connection.teleport(...) method:
+            ServerGamePacketListenerImpl conn = p.connection;
+            conn.teleport(sx, sy, sz, p.getYRot(), p.getXRot());
+        }
+
     }
 
     @SubscribeEvent
@@ -125,6 +155,7 @@ public class Game {
                 if (game.postGamePhase) {
                     // switch out of post-game into a fresh round
                     game.postGamePhase = false;
+                    clearPreviousData(server);
                     game.startGame(server);
                 } else {
                     // initial intermission → first game
@@ -138,10 +169,13 @@ public class Game {
             if (game.tickCounter % SURVIVOR_POINT_INTERVAL == 0) {
                 game.awardSurvivorRewards(server);
             }
+            if (game.getSurvivors().size() >= 1 && game.getInfected().isEmpty()) {
+                reInfectFirstPlayer(server);
+            }
             // Check end conditions
             if (game.tickCounter >= GAME_TICKS) {
                 game.endGame(true, server);
-            } else if (game.survivors.isEmpty()) {
+            } else if (game.survivors.isEmpty() && game.getInfected().size() > 1) {
                 game.endGame(false, server);
             }
         }
@@ -168,11 +202,64 @@ public class Game {
             );
         }
 
+        if (game.running) {
+            for (UUID infId : new HashSet<>(game.getInfected())) {
+                ServerPlayer inf = server.getPlayerList().getPlayer(infId);
+                if (inf == null) continue;
+                // iterate over survivors
+                for (UUID survId : new HashSet<>(game.getSurvivors())) {
+                    ServerPlayer surv = server.getPlayerList().getPlayer(survId);
+                    if (surv == null) continue;
+                    // if bounding boxes touch
+                    if (inf.getBoundingBox().expandTowards(0.1,0.1,0.1)
+                            .intersects(surv.getBoundingBox())) {
+                        game.infectPlayer(surv, inf);
+                        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                            player.connection.send(new ClientboundSystemChatPacket(Component.literal(inf.getName().getString() + " has infected" + surv.getName().getString()), false));
+                        }
+                    }
+                }
+            }
+        }
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            PlayerStatsManager.PlayerStats ps = PlayerStatsManager.get().getStats(player.getUUID());
+            Component bar = Component.literal("Points: " + ps.getPoints() + "  XP: " + ps.getXp());
+            player.connection.send(new ClientboundSetActionBarTextPacket(bar));
+        }
     }
 
+    private static void clearPreviousData(MinecraftServer server) {
 
+    }
+
+    public static void reInfectFirstPlayer(MinecraftServer server){
+        Game game = Game.get();
+        List<UUID> list = new ArrayList<>(game.getSurvivors());
+        if (!list.isEmpty()) {
+            UUID firstId = list.get(new Random().nextInt(list.size()));
+            game.getSurvivors().remove(firstId);
+            game.getInfected().add(firstId);
+
+            ServerPlayer firstPlayer = server.getPlayerList().getPlayer(firstId);
+            if (firstPlayer != null) {
+                // Teleport them as well (optional, same spawn)
+
+
+                // Broadcast the “first infected” message
+                String msg = firstPlayer.getName().getString() + " is the first infected!";
+                for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                    p.connection.send(new ClientboundSystemChatPacket(
+                            Component.literal(msg),
+                            false
+                    ));
+                }
+            }
+        }
+    }
     public void startGame(MinecraftServer server) {
-        // 1) Grab a random map (Optional<MapData> → handle empty)
+
+
         sb = server.overworld().getScoreboard();
         if (sTeam == null) {
             sTeam = sb.getPlayerTeam("Survivors");
@@ -185,29 +272,6 @@ public class Game {
             iTeam.setColor(ChatFormatting.RED);
         }
 
-        Optional<MapManager.MapData> optMap = MapManager.get().getRandomMap();
-        if (nextMap != null) {
-            currentMap = nextMap;
-            nextMap = null;
-        } else {
-            Optional<MapManager.MapData> opt = MapManager.get().getRandomMap();
-            if (opt.isEmpty()) {
-                // …no maps defined…
-                return;
-            }
-            currentMap = opt.get();
-        }
-        if (optMap.isEmpty()) {
-            // no maps defined → notify everyone
-            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-                p.connection.send(new ClientboundSystemChatPacket(
-                        Component.literal("[InfectedMod] No maps defined! Use /addMap first."),
-                        false
-                ));
-            }
-            return;
-        }
-        currentMap = optMap.get();
         sb.getTeamNames().forEach(sb::removePlayerFromTeam);  // clear all
         for (UUID id : survivors) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
@@ -218,12 +282,8 @@ public class Game {
         tickCounter  = 0;
         intermission = false;
         running      = true;
-        survivors.clear();
-        infected.clear();
-
-        // 3) Teleport everyone to the map's spawn, init survivors and stats
-
-
+        //survivors.clear();
+        //infected.clear();
         // 4) Pick and announce the first infected
         List<UUID> list = new ArrayList<>(survivors);
         if (!list.isEmpty()) {
@@ -254,6 +314,9 @@ public class Game {
                     false
             ));
         }
+
+
+
     }
 
 
@@ -293,6 +356,7 @@ public class Game {
             PlayerStats ps = stats.get(by.getUUID());
             ps.addPoints(INFECT_POINT);
             ps.addXp(INFECT_XP);
+            PlayerStatsManager.get().save();
         }
         // TODO: teleport newly infected to map spawn
     }
@@ -305,12 +369,14 @@ public class Game {
 
             ServerPlayer sp = server.getPlayerList().getPlayer(id);
             if (sp != null) {
+                PlayerStatsManager.get().save();
                 for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 player.sendSystemMessage(
                         Component.literal("Survivor reward: +" + SURVIVOR_POINT + " points, +" + SURVIVOR_XP + " XP")
                 );}
             }
         }
+        PlayerStatsManager.get().save();
     }
 
     private void endGame(boolean survivorsWin, MinecraftServer server) {
@@ -361,7 +427,39 @@ public class Game {
             ));
         }
         PlayerStatsManager.get().save();
+        survivors.clear();
+        infected.clear();
+
+        for(ServerPlayer p : server.getPlayerList().getPlayers()) {
+            survivors.add(p.getUUID());
+        }
     }
+
+    @SubscribeEvent
+    public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent ev) {
+        if (!(ev.getEntity() instanceof ServerPlayer player)) return;
+        Game game = Game.get();
+        if (!game.isRunning()) return;
+
+        UUID id = player.getUUID();
+        if (game.getInfected().contains(id)) {
+            // returning infected
+            ScoreboardManager.assignInfected(player);
+            player.sendSystemMessage(
+                    Component.literal("You rejoined as infected.")
+            );
+        } else {
+            // new or returning survivor
+            game.getSurvivors().add(id);
+            ScoreboardManager.assignSurvivor(player);
+            player.sendSystemMessage(
+                    Component.literal("You rejoined as a survivor.")
+            );
+        }
+    }
+
+
+
 
     public static class PlayerStats {
         private int points = 0;

@@ -1,6 +1,7 @@
 package com.infectedmod.logic.commands;
 
 
+import com.infectedmod.InfectedMod;
 import com.infectedmod.logic.Game;
 import com.infectedmod.logic.MapManager;
 import com.infectedmod.logic.PlayerStatsManager;
@@ -8,8 +9,6 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.commands.Commands;
-import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -22,7 +21,10 @@ import net.minecraftforge.fml.common.Mod;
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
-@Mod.EventBusSubscriber
+@Mod.EventBusSubscriber(
+        modid = InfectedMod.MODID,
+        bus   = Mod.EventBusSubscriber.Bus.FORGE   // <— ensure Forge bus, not the mod (lifecycle) bus
+)
 public class ModCommands {
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
@@ -66,95 +68,117 @@ public class ModCommands {
         dispatcher.register(literal("givePoints")
                 .requires(src -> src.hasPermission(2))
                 .then(argument("playerName", StringArgumentType.word())
-                        .then(argument("points", IntegerArgumentType.integer()))
-                        .executes(ctx -> {
-                            String name = StringArgumentType.getString(ctx, "playerName");
-                            int points = IntegerArgumentType.getInteger(ctx, "points");
-                            MinecraftServer server = ctx.getSource().getServer();
-                            PlayerList p = server.getPlayerList();
-                            PlayerStatsManager ps = PlayerStatsManager.get();
-                            if(p.getPlayerByName(name) == null) {
-                                ctx.getSource().sendFailure(
-                                        Component.literal("§Player '" + name + "' doesn't exist.")
-                                );
-                            }
-                            else{
-                                ServerPlayer player = p.getPlayerByName(name);
-                                assert player != null;
-                                ps.updateStats(player.getUUID(), points, 0);
-                                ps.save();
-                                ctx.getSource().sendSuccess( () ->
-                                                Component.literal("§aGave '" + points + "' points to player " + name + "."),
-                                        false
-                                );
+                        .then(argument("points", IntegerArgumentType.integer())
+                                .executes(ctx -> {
+                                    String name = StringArgumentType.getString(ctx, "playerName");
+                                    int pts     = IntegerArgumentType.getInteger(ctx, "points");
 
-                            }
+                                    MinecraftServer server = ctx.getSource().getServer();
+                                    PlayerList plist = server.getPlayerList();
 
-                            return 1;
-                        })
+                                    // find the target
+                                    ServerPlayer target = plist.getPlayers().stream()
+                                            .filter(p -> p.getGameProfile().getName().equalsIgnoreCase(name))
+                                            .findFirst().orElse(null);
+
+                                    if (target == null) {
+                                        ctx.getSource().sendFailure(
+                                                Component.literal("§cNo online player named '" + name + "'")
+                                        );
+                                        return 0;
+                                    }
+
+                                    // update stats & save
+                                    PlayerStatsManager mgr = PlayerStatsManager.get();
+                                    mgr.updateStats(target.getUUID(), pts, 0);
+                                    mgr.save();
+
+                                    ctx.getSource().sendSuccess(
+                                            () -> Component.literal("§aGave " + pts + " points to " + name),
+                                            false
+                                    );
+                                    return 1;
+                                })
+                        )
                 )
         );
+
 
         dispatcher.register(literal("giveXP")
                 .requires(src -> src.hasPermission(2))
                 .then(argument("playerName", StringArgumentType.word())
-                        .then(argument("xp", IntegerArgumentType.integer()))
-                        .executes(ctx -> {
-                            String name = StringArgumentType.getString(ctx, "playerName");
-                            int xp = IntegerArgumentType.getInteger(ctx, "xp");
-                            MinecraftServer server = ctx.getSource().getServer();
-                            PlayerList p = server.getPlayerList();
-                            PlayerStatsManager ps = PlayerStatsManager.get();
-                            if(p.getPlayerByName(name) == null) {
-                                ctx.getSource().sendFailure(
-                                        Component.literal("§Player '" + name + "' doesn't exist.")
-                                );
-                            }
-                            else{
-                                ServerPlayer player = p.getPlayerByName(name);
-                                assert player != null;
-                                ps.updateStats(player.getUUID(), 0, xp);
-                            }
-                            ps.save();
-                            ctx.getSource().sendSuccess( () ->
-                                            Component.literal("§aGave '" + xp + "' XP to player " + name + "."),
-                                    false
-                            );
-                            return 1;
-                        })
+                        .then(argument("xp", IntegerArgumentType.integer())
+                                .executes(ctx -> {
+                                    String name = StringArgumentType.getString(ctx, "playerName");
+                                    int xp     = IntegerArgumentType.getInteger(ctx, "xp");
+
+                                    MinecraftServer server = ctx.getSource().getServer();
+                                    PlayerList plist = server.getPlayerList();
+
+                                    // find the target
+                                    ServerPlayer target = plist.getPlayers().stream()
+                                            .filter(p -> p.getGameProfile().getName().equalsIgnoreCase(name))
+                                            .findFirst().orElse(null);
+
+                                    if (target == null) {
+                                        ctx.getSource().sendFailure(
+                                                Component.literal("§cNo online player named '" + name + "'")
+                                        );
+                                        return 0;
+                                    }
+
+                                    // update stats & save
+                                    PlayerStatsManager mgr = PlayerStatsManager.get();
+                                    mgr.updateStats(target.getUUID(), 0, xp);
+                                    mgr.save();
+
+                                    ctx.getSource().sendSuccess(
+                                            () -> Component.literal("§aGave " + xp + " points to " + name),
+                                            false
+                                    );
+                                    return 1;
+                                })
+                        )
                 )
         );
 
         dispatcher.register(literal("givePointsAndXP")
                 .requires(src -> src.hasPermission(2))
                 .then(argument("playerName", StringArgumentType.word())
-                        .then(argument("points", IntegerArgumentType.integer()))
-                        .then(argument("xp", IntegerArgumentType.integer()))
+                        .then(argument("points", IntegerArgumentType.integer())
+                        .then(argument("xp", IntegerArgumentType.integer())
                         .executes(ctx -> {
                             String name = StringArgumentType.getString(ctx, "playerName");
-                            int points = IntegerArgumentType.getInteger(ctx, "points");
-                            int xp = IntegerArgumentType.getInteger(ctx, "xp");
+                            int pts    = IntegerArgumentType.getInteger(ctx, "points");
+                            int xp    = IntegerArgumentType.getInteger(ctx, "points");
+
                             MinecraftServer server = ctx.getSource().getServer();
-                            PlayerList p = server.getPlayerList();
-                            PlayerStatsManager ps = PlayerStatsManager.get();
-                            if(p.getPlayerByName(name) == null) {
+                            PlayerList plist = server.getPlayerList();
+
+                            // Manually find by username (case‐insensitive)
+                            ServerPlayer target = plist.getPlayers().stream()
+                                    .filter(p -> p.getGameProfile().getName().equalsIgnoreCase(name))
+                                    .findFirst().orElse(null);
+
+                            if (target == null) {
                                 ctx.getSource().sendFailure(
-                                        Component.literal("§Player '" + name + "' doesn't exist.")
+                                        Component.literal("§cNo online player named '" + name + "'")
                                 );
+                                return 0;
                             }
-                            else{
-                                ServerPlayer player = p.getPlayerByName(name);
-                                assert player != null;
-                                ps.updateStats(player.getUUID(), points, xp);
-                            }
-                            ps.save();
+
+                            // Update stats & save
+                            var statsMgr = PlayerStatsManager.get();
+                            statsMgr.updateStats(target.getUUID(), pts, xp);
+                            statsMgr.save();
+
                             ctx.getSource().sendSuccess( () ->
-                                            Component.literal("§aGave '" + points + "' and " + xp + " to player " + name + "."),
+                                    Component.literal(  "§aGave " + pts + " points and " + xp + " XP to" + name),
                                     false
                             );
                             return 1;
                         })
-                )
+                )))
         );
 
         dispatcher.register(literal("deleteMap")
