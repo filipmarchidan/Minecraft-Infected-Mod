@@ -26,7 +26,7 @@ public class ScoreboardManager {
     private static Objective   sidebarObj;
     private static PlayerTeam  survivorsTeam;
     private static PlayerTeam  infectedTeam;
-
+    private static final Set<String> oldScoreKeys = new HashSet<>();
     // 1) On server start, create objective & teams
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent ev) {
@@ -95,24 +95,41 @@ public class ScoreboardManager {
 
         }
 
-        // New HUD lines
-        Map<String, Integer> lines = new LinkedHashMap<>();
-        lines.put("Points: TBD", 5);
-        lines.put("XP:     TBD", 4);
-
-        if (game.isRunning()) {
-            long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
-            long sec = ticksLeft / 20;
-            String time = String.format("%02d:%02d", sec/60, sec%60);
-
-            lines.put("Survivors: " + game.getSurvivors().size(), 3);
-            lines.put("Infected:  " + game.getInfected().size(), 2);
-            lines.put("Time:      " + time,                      1);
+//        // New HUD lines
+//        Map<String, Integer> lines = new LinkedHashMap<>();
+//        lines.put("Points: TBD", 5);
+//        lines.put("XP:     TBD", 4);
+//
+//        if (game.isRunning()) {
+//            long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
+//            long sec = ticksLeft / 20;
+//            String time = String.format("%02d:%02d", sec/60, sec%60);
+//
+//            lines.put("Survivors: " + game.getSurvivors().size(), 3);
+//            lines.put("Infected:  " + game.getInfected().size(), 2);
+//            lines.put("Time:      " + time,                      1);
+//        }
+//
+//        for (var entry : lines.entrySet()) {
+//            sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(entry.getKey()), sidebarObj)
+//                    .set(entry.getValue());
+//        }
+        for (String key : oldScoreKeys) {
+            sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
         }
+        oldScoreKeys.clear();
 
-        for (var entry : lines.entrySet()) {
-            sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(entry.getKey()), sidebarObj)
-                    .set(entry.getValue());
+        Map<String,Integer> lines = new LinkedHashMap<>();
+        lines.put("Survivors: " + game.getSurvivors().size(), 3);
+        lines.put("Infected:  " + game.getInfected().size(), 2);
+        long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
+        String time = String.format("%02d:%02d", (ticksLeft/20)/60, (ticksLeft/20)%60);
+        lines.put("Time:      " + time,                      1);
+
+        for (var e : lines.entrySet()) {
+            sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(e.getKey()), sidebarObj)
+                    .set(e.getValue());
+            oldScoreKeys.add(e.getKey());
         }
     }
 

@@ -5,6 +5,7 @@ import com.infectedmod.InfectedMod;
 import com.infectedmod.ui.ScoreboardManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -68,6 +69,23 @@ public class Game {
     public Set<UUID> getInfected() { return infected; }
     public void startIntermission(MinecraftServer server) {
         // Reset state
+
+        BlockPos spawn = currentMap.spawn;
+        double sx = spawn.getX() + 0.5;
+        double sy = spawn.getY() + 0.5;
+        double sz = spawn.getZ() + 0.5;
+
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            UUID id = p.getUUID();
+            survivors.add(id);
+            stats.putIfAbsent(id, new PlayerStats());
+
+            // Use the connection.teleport(...) method:
+            ServerGamePacketListenerImpl conn = p.connection;
+            conn.teleport(sx, sy, sz, p.getYRot(), p.getXRot());
+        }
+
+
         survivors.clear();
         infected.clear();
         stats.clear();
@@ -127,14 +145,45 @@ public class Game {
                 game.endGame(false, server);
             }
         }
+
+
+
+        // Inside your server‐tick loop (e.g. onServerTick in Game.java):
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            UUID uuid = player.getUUID();
+
+            // Fetch this player’s stats
+            PlayerStatsManager.PlayerStats stats =
+                    PlayerStatsManager.get().getStats(uuid);
+
+            // Build the action‐bar component
+            Component text = Component.literal(
+                    "Points: " + stats.getPoints() +
+                            "    XP: "     + stats.getXp()
+            );
+
+            // Send it as an action‐bar packet
+            player.connection.send(
+                    new ClientboundSetActionBarTextPacket(text)
+            );
+        }
+
     }
 
 
     public void startGame(MinecraftServer server) {
         // 1) Grab a random map (Optional<MapData> → handle empty)
-
-        sTeam.setColor(ChatFormatting.GREEN);
-        iTeam.setColor(ChatFormatting.RED);
+        sb = server.overworld().getScoreboard();
+        if (sTeam == null) {
+            sTeam = sb.getPlayerTeam("Survivors");
+            if (sTeam == null) sTeam = sb.addPlayerTeam("Survivors");
+            sTeam.setColor(ChatFormatting.GREEN);
+        }
+        if (iTeam == null) {
+            iTeam = sb.getPlayerTeam("Infected");
+            if (iTeam == null) iTeam = sb.addPlayerTeam("Infected");
+            iTeam.setColor(ChatFormatting.RED);
+        }
 
         Optional<MapManager.MapData> optMap = MapManager.get().getRandomMap();
         if (nextMap != null) {
@@ -173,20 +222,7 @@ public class Game {
         infected.clear();
 
         // 3) Teleport everyone to the map's spawn, init survivors and stats
-        BlockPos spawn = currentMap.spawn;
-        double sx = spawn.getX() + 0.5;
-        double sy = spawn.getY() + 0.5;
-        double sz = spawn.getZ() + 0.5;
 
-        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-            UUID id = p.getUUID();
-            survivors.add(id);
-            stats.putIfAbsent(id, new PlayerStats());
-
-            // Use the connection.teleport(...) method:
-            ServerGamePacketListenerImpl conn = p.connection;
-            conn.teleport(sx, sy, sz, p.getYRot(), p.getXRot());
-        }
 
         // 4) Pick and announce the first infected
         List<UUID> list = new ArrayList<>(survivors);
@@ -198,7 +234,7 @@ public class Game {
             ServerPlayer firstPlayer = server.getPlayerList().getPlayer(firstId);
             if (firstPlayer != null) {
                 // Teleport them as well (optional, same spawn)
-                firstPlayer.connection.teleport(sx, sy, sz, firstPlayer.getYRot(), firstPlayer.getXRot());
+
 
                 // Broadcast the “first infected” message
                 String msg = firstPlayer.getName().getString() + " is the first infected!";

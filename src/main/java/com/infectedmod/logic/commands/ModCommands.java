@@ -3,7 +3,9 @@ package com.infectedmod.logic.commands;
 
 import com.infectedmod.logic.Game;
 import com.infectedmod.logic.MapManager;
+import com.infectedmod.logic.PlayerStatsManager;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -11,9 +13,14 @@ import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 @Mod.EventBusSubscriber
 public class ModCommands {
@@ -21,8 +28,7 @@ public class ModCommands {
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
 
-        // /startRound
-        dispatcher.register(Commands.literal("startRound")
+        dispatcher.register(literal("startRound")
                 .requires(source -> source.hasPermission(4))
                 .executes(ctx -> {
                     CommandSourceStack src = ctx.getSource();
@@ -33,53 +39,211 @@ public class ModCommands {
                 })
         );
 
-        // /addMap <name>
-        dispatcher.register(Commands.literal("addMap")
-                .requires(source -> source.hasPermission(4))
-                .then(Commands.argument("name", StringArgumentType.word())
+
+        dispatcher.register(literal("addMap")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("name", StringArgumentType.word())
                         .executes(ctx -> {
                             String name = StringArgumentType.getString(ctx, "name");
-                            MapManager.get().addMap(name);
-                            ctx.getSource().sendSuccess(() -> Component.literal("Map '" + name + "' added."), true);
+                            MapManager mm = MapManager.get();
+                            if (mm.hasMap(name)) {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§cMap '" + name + "' already exists.")
+                                );
+                            } else {
+                                mm.addMap(name);
+                                ctx.getSource().sendSuccess( () ->
+                                        Component.literal("§aCreated map '" + name + "'."),
+                                        false
+                                );
+                            }
                             return 1;
                         })
                 )
         );
 
-        // /playableArea <pos1> <pos2> <name>
-        dispatcher.register(Commands.literal("playableArea")
-                .requires(source -> source.hasPermission(4))
-                .then(Commands.argument("pos1", BlockPosArgument.blockPos())
-                        .then(Commands.argument("pos2", BlockPosArgument.blockPos())
-                                .then(Commands.argument("name", StringArgumentType.word())
-                                        .executes(ctx -> {
-                                            BlockPos p1 = BlockPosArgument.getLoadedBlockPos(ctx, "pos1");
-                                            BlockPos p2 = BlockPosArgument.getLoadedBlockPos(ctx, "pos2");
-                                            String name = StringArgumentType.getString(ctx, "name");
-                                            MapManager.get().setPlayableArea(name, p1, p2);
-                                            ctx.getSource().sendSuccess(() -> Component.literal("Playable area set for '" + name + "'."), true);
-                                            return 1;
-                                        })
-                                )
-                        )
+
+        dispatcher.register(literal("givePoints")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("playerName", StringArgumentType.word())
+                        .then(argument("points", IntegerArgumentType.integer()))
+                        .executes(ctx -> {
+                            String name = StringArgumentType.getString(ctx, "playerName");
+                            int points = IntegerArgumentType.getInteger(ctx, "points");
+                            MinecraftServer server = ctx.getSource().getServer();
+                            PlayerList p = server.getPlayerList();
+                            PlayerStatsManager ps = PlayerStatsManager.get();
+                            if(p.getPlayerByName(name) == null) {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§Player '" + name + "' doesn't exist.")
+                                );
+                            }
+                            else{
+                                ServerPlayer player = p.getPlayerByName(name);
+                                assert player != null;
+                                ps.updateStats(player.getUUID(), points, 0);
+                                ps.save();
+                                ctx.getSource().sendSuccess( () ->
+                                                Component.literal("§aGave '" + points + "' points to player " + name + "."),
+                                        false
+                                );
+
+                            }
+
+                            return 1;
+                        })
                 )
         );
 
-        // /setMapSpawn <pos> <name>
-        dispatcher.register(Commands.literal("setMapSpawn")
-                .requires(source -> source.hasPermission(4))
-                .then(Commands.argument("pos", BlockPosArgument.blockPos())
-                        .then(Commands.argument("name", StringArgumentType.word())
-                                .executes(ctx -> {
-                                    BlockPos spawn = BlockPosArgument.getLoadedBlockPos(ctx, "pos");
-                                    String name = StringArgumentType.getString(ctx, "name");
-                                    MapManager.get().setSpawnPoint(name, spawn);
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Spawn point set for '" + name + "'."), true);
-                                    return 1;
-                                })
-                        )
+        dispatcher.register(literal("giveXP")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("playerName", StringArgumentType.word())
+                        .then(argument("xp", IntegerArgumentType.integer()))
+                        .executes(ctx -> {
+                            String name = StringArgumentType.getString(ctx, "playerName");
+                            int xp = IntegerArgumentType.getInteger(ctx, "xp");
+                            MinecraftServer server = ctx.getSource().getServer();
+                            PlayerList p = server.getPlayerList();
+                            PlayerStatsManager ps = PlayerStatsManager.get();
+                            if(p.getPlayerByName(name) == null) {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§Player '" + name + "' doesn't exist.")
+                                );
+                            }
+                            else{
+                                ServerPlayer player = p.getPlayerByName(name);
+                                assert player != null;
+                                ps.updateStats(player.getUUID(), 0, xp);
+                            }
+                            ps.save();
+                            ctx.getSource().sendSuccess( () ->
+                                            Component.literal("§aGave '" + xp + "' XP to player " + name + "."),
+                                    false
+                            );
+                            return 1;
+                        })
                 )
         );
+
+        dispatcher.register(literal("givePointsAndXP")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("playerName", StringArgumentType.word())
+                        .then(argument("points", IntegerArgumentType.integer()))
+                        .then(argument("xp", IntegerArgumentType.integer()))
+                        .executes(ctx -> {
+                            String name = StringArgumentType.getString(ctx, "playerName");
+                            int points = IntegerArgumentType.getInteger(ctx, "points");
+                            int xp = IntegerArgumentType.getInteger(ctx, "xp");
+                            MinecraftServer server = ctx.getSource().getServer();
+                            PlayerList p = server.getPlayerList();
+                            PlayerStatsManager ps = PlayerStatsManager.get();
+                            if(p.getPlayerByName(name) == null) {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§Player '" + name + "' doesn't exist.")
+                                );
+                            }
+                            else{
+                                ServerPlayer player = p.getPlayerByName(name);
+                                assert player != null;
+                                ps.updateStats(player.getUUID(), points, xp);
+                            }
+                            ps.save();
+                            ctx.getSource().sendSuccess( () ->
+                                            Component.literal("§aGave '" + points + "' and " + xp + " to player " + name + "."),
+                                    false
+                            );
+                            return 1;
+                        })
+                )
+        );
+
+        dispatcher.register(literal("deleteMap")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("name", StringArgumentType.word())
+                        .executes(ctx -> {
+                            String name = StringArgumentType.getString(ctx, "name");
+                            MapManager mm = MapManager.get();
+                            if (!mm.hasMap(name)) {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§cMap '" + name + " 'doesn't exist.")
+                                );
+                            } else {
+                                mm.deleteMap(name);
+                                ctx.getSource().sendSuccess( () ->
+                                                Component.literal("§aDeleted map '" + name + "'."),
+                                        false
+                                );
+                            }
+                            return 1;
+                        })
+                )
+        );
+
+        dispatcher.register(literal("playableArea")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("x1", IntegerArgumentType.integer())
+                        .then(argument("y1", IntegerArgumentType.integer())
+                                .then(argument("z1", IntegerArgumentType.integer())
+                                        .then(argument("x2", IntegerArgumentType.integer())
+                                                .then(argument("y2", IntegerArgumentType.integer())
+                                                        .then(argument("z2", IntegerArgumentType.integer())
+                                                                .then(argument("name", StringArgumentType.word())
+                                                                        .executes(ctx -> {
+                                                                            int x1 = IntegerArgumentType.getInteger(ctx, "x1");
+                                                                            int y1 = IntegerArgumentType.getInteger(ctx, "y1");
+                                                                            int z1 = IntegerArgumentType.getInteger(ctx, "z1");
+                                                                            int x2 = IntegerArgumentType.getInteger(ctx, "x2");
+                                                                            int y2 = IntegerArgumentType.getInteger(ctx, "y2");
+                                                                            int z2 = IntegerArgumentType.getInteger(ctx, "z2");
+                                                                            String name = StringArgumentType.getString(ctx, "name");
+
+                                                                            MapManager mm = MapManager.get();
+                                                                            if (!mm.hasMap(name)) {
+                                                                                ctx.getSource().sendFailure(
+                                                                                        Component.literal("§cNo map named '" + name + "' found.")
+                                                                                );
+                                                                            } else {
+                                                                                mm.setPlayableArea(name,
+                                                                                        new BlockPos(x1, y1, z1),
+                                                                                        new BlockPos(x2, y2, z2)
+                                                                                );
+                                                                                ctx.getSource().sendSuccess( () ->
+                                                                                        Component.literal("§aSet playable area for '" + name + "'."),
+                                                                                        false
+                                                                                );
+                                                                            }
+                                                                            return 1;
+                                                                        })
+                                                                ))))))));
+
+
+        dispatcher.register(literal("setMapSpawn")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("x", IntegerArgumentType.integer())
+                        .then(argument("y", IntegerArgumentType.integer())
+                                .then(argument("z", IntegerArgumentType.integer())
+                                        .then(argument("name", StringArgumentType.word())
+                                                .executes(ctx -> {
+                                                    int x = IntegerArgumentType.getInteger(ctx, "x");
+                                                    int y = IntegerArgumentType.getInteger(ctx, "y");
+                                                    int z = IntegerArgumentType.getInteger(ctx, "z");
+                                                    String name = StringArgumentType.getString(ctx, "name");
+
+                                                    MapManager mm = MapManager.get();
+                                                    if (!mm.hasMap(name)) {
+                                                        ctx.getSource().sendFailure(
+                                                                Component.literal("§cNo map named '" + name + "' found.")
+                                                        );
+                                                    } else {
+                                                        mm.setSpawnPoint(name, new BlockPos(x, y, z));
+                                                        ctx.getSource().sendSuccess( () ->
+                                                                Component.literal("§aSet spawn for '" + name + "'."),
+                                                                false
+                                                        );
+                                                    }
+                                                    return 1;
+                                                })
+                                        )))));
     }
 }
 

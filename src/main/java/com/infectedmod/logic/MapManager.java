@@ -1,6 +1,7 @@
 package com.infectedmod.logic;
 
 import com.google.gson.*;
+import com.infectedmod.InfectedMod;
 import net.minecraft.core.BlockPos;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -11,7 +12,11 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class MapManager {
-    private static final Path MAPS_FILE = FMLPaths.CONFIGDIR.get().resolve("com/infectedmod/logic/maps.json");
+    // In MapManager.java
+    private static final Path MAPS_FILE =
+            FMLPaths.CONFIGDIR.get().resolve(InfectedMod.MODID).resolve("maps.json");
+
+
     private static MapManager instance;
     private final Map<String, MapData> maps = new LinkedHashMap<>();
     private final Random random = new Random();
@@ -27,6 +32,16 @@ public class MapManager {
 
     private void loadMaps() {
         try {
+
+            Path dir = MAPS_FILE.getParent();
+            if (!Files.exists(dir)) Files.createDirectories(dir);
+
+            if (!Files.exists(MAPS_FILE)) {
+                // creates empty template
+                saveMaps();
+                return;
+            }
+
             if (!Files.exists(MAPS_FILE)) {
                 Files.createDirectories(MAPS_FILE.getParent());
                 saveMaps();
@@ -70,28 +85,37 @@ public class MapManager {
         }
     }
 
-    public void addMap(String name) {
-        if (!maps.containsKey(name)) {
-            maps.put(name, new MapData(name, BlockPos.ZERO, BlockPos.ZERO, BlockPos.ZERO));
+    public void deleteMap(String name){
+        if(maps.containsKey(name)){
+            maps.remove(name);
             saveMaps();
         }
+    }
+    public boolean hasMap(String name) {
+        return maps.containsKey(name);
+    }
+
+    public void addMap(String name) {
+        if (maps.containsKey(name)) return;
+        maps.put(name, new MapData(name,
+                BlockPos.ZERO, BlockPos.ZERO, BlockPos.ZERO
+        ));
+        saveMaps();
     }
 
     public void setPlayableArea(String name, BlockPos p1, BlockPos p2) {
         MapData md = maps.get(name);
-        if (md != null) {
-            md.pos1 = p1;
-            md.pos2 = p2;
-            saveMaps();
-        }
+        if (md == null) return;
+        md.pos1 = p1;
+        md.pos2 = p2;
+        saveMaps();
     }
 
     public void setSpawnPoint(String name, BlockPos spawn) {
         MapData md = maps.get(name);
-        if (md != null) {
-            md.spawn = spawn;
-            saveMaps();
-        }
+        if (md == null) return;
+        md.spawn = spawn;
+        saveMaps();
     }
 
     public Optional<MapData> getRandomMap() {

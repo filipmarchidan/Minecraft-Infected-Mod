@@ -1,6 +1,12 @@
 package com.infectedmod.logic;
 
 import com.google.gson.*;
+import com.infectedmod.InfectedMod;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLPaths;
 import java.io.*;
 import java.nio.file.*;
@@ -8,7 +14,7 @@ import java.util.*;
 
 public class PlayerStatsManager {
     private static final Path STATS_FILE =
-            FMLPaths.CONFIGDIR.get().resolve("com/infectedmod/logic/player_stats.json");
+            FMLPaths.CONFIGDIR.get().resolve(InfectedMod.MODID).resolve("player_stats.json");
     private static PlayerStatsManager instance;
     private final Map<UUID, PlayerStats> stats = new HashMap<>();
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -57,16 +63,46 @@ public class PlayerStatsManager {
             e.printStackTrace();
         }
     }
+        @SubscribeEvent
+        public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent ev) {
+            if (!(ev.getEntity() instanceof ServerPlayer player)) return;
+            UUID id = player.getUUID();
+            // computeIfAbsent → ensures stats exist
+            var stats = PlayerStatsManager.get().getStats(id);
+            if (stats.getPoints() == 0 && stats.getXp() == 0) {
+                player.sendSystemMessage(
+                        Component.literal("Welcome, new player! Your stats have been initialized.")
+                );
+            } else {
+                player.sendSystemMessage(
+                        Component.literal("Welcome back! Points: " + stats.getPoints() +
+                                ", XP: " + stats.getXp())
+                );
+            }
+            // immediately persist the file so you see it on disk
+            PlayerStatsManager.get().save();
+        }
+
+
 
     public PlayerStats getStats(UUID playerId) {
         return stats.computeIfAbsent(playerId, id -> new PlayerStats(0,0));
     }
 
+    @SubscribeEvent
+    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent ev) {
+        if (ev.getEntity() instanceof ServerPlayer player) {
+            UUID id = player.getUUID();
+            // any last‐minute stat updates…
+            PlayerStatsManager.get().save();
+        }
+    }
     // helper for Game end‐of‐round or player logout
     public void updateStats(UUID id, int deltaPts, int deltaXp) {
         PlayerStats ps = getStats(id);
         ps.addPoints(deltaPts);
         ps.addXp(deltaXp);
+        PlayerStatsManager.get().save();
     }
 
     public static class PlayerStats {
