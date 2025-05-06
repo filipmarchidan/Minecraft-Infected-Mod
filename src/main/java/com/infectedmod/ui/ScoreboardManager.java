@@ -2,8 +2,10 @@ package com.infectedmod.ui;
 
 import com.infectedmod.InfectedMod;
 import com.infectedmod.logic.Game;
+import com.infectedmod.logic.PlayerStatsManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -33,6 +35,9 @@ public class ScoreboardManager {
         MinecraftServer server = ev.getServer();
         Scoreboard sb = server.overworld().getScoreboard();
 
+        if (sb.getObjective(OBJ_NAME) != null) {
+            sb.setDisplayObjective(DisplaySlot.SIDEBAR, null);
+        }
         // Sidebar objective
         sidebarObj = sb.getObjective(OBJ_NAME);
         if (sidebarObj == null) {
@@ -47,7 +52,7 @@ public class ScoreboardManager {
         }
         sb.setDisplayObjective(DisplaySlot.SIDEBAR, sidebarObj);
 
-        // TAB teams
+
 
         survivorsTeam = sb.getPlayerTeam("Survivors");
         if (survivorsTeam == null) {
@@ -61,6 +66,8 @@ public class ScoreboardManager {
             infectedTeam = sb.addPlayerTeam("Infected");
         }
         infectedTeam.setColor(ChatFormatting.RED);
+
+
     }
 
     /** Assign this player to the Survivors team (lazy‐init teams). */
@@ -121,8 +128,16 @@ public class ScoreboardManager {
         // Reassign teams
         sb.getTeamNames().forEach(name -> {
             PlayerTeam team = sb.getPlayersTeam(name);
-            if (team != null) Objects.requireNonNull(sb.getPlayersTeam(name)).getPlayers().forEach(player -> sb.removePlayerFromTeam(player, team));
+            if (team != null) {
+                Set<String> playersInTeam = new HashSet<>(team.getPlayers());
+                for (String player : playersInTeam) {
+                    if (team.getPlayers().contains(player)) {
+                        sb.removePlayerFromTeam(player, team);
+                    }
+                }
+            }
         });
+
 
         for (UUID id : game.getSurvivors()) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
@@ -140,24 +155,59 @@ public class ScoreboardManager {
             sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(entry), sidebarObj);
 
         }
-
 //        }
-        for (String key : oldScoreKeys) {
-            sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
+        if(game.isRunning() || game.isIntermission()) {
+            for (String key : oldScoreKeys) {
+                sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
+            }
+            oldScoreKeys.clear();
+
+            Map<String, Integer> lines = new LinkedHashMap<>();
+
+            lines.put("Survivors: " + game.getSurvivors().size(), 3);
+            lines.put("Infected:  " + game.getInfected().size(), 2);
+            long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
+            String time = String.format("%02d:%02d", (ticksLeft / 20) / 60, (ticksLeft / 20) % 60);
+            String timeLabel = game.isIntermission() ? "Intermission" : "Time";
+            lines.put(timeLabel + ": " + time, 1);
+            for (String key : oldScoreKeys) {
+                sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
+            }
+            oldScoreKeys.clear();
+
+            for (Map.Entry<String, Integer> entry : lines.entrySet()) {
+                sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(entry.getKey()), sidebarObj)
+                        .set(entry.getValue());
+                oldScoreKeys.add(entry.getKey());
+            }
+
         }
-        oldScoreKeys.clear();
 
-        Map<String,Integer> lines = new LinkedHashMap<>();
-        lines.put("Survivors: " + game.getSurvivors().size(), 3);
-        lines.put("Infected:  " + game.getInfected().size(), 2);
-        long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
-        String time = String.format("%02d:%02d", (ticksLeft/20)/60, (ticksLeft/20)%60);
-        lines.put("Time:      " + time,                      1);
+        // Inside your server‐tick loop (e.g. onServerTick in Game.java):
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            UUID uuid = player.getUUID();
 
-        for (var e : lines.entrySet()) {
-            sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(e.getKey()), sidebarObj)
-                    .set(e.getValue());
-            oldScoreKeys.add(e.getKey());
+            // Fetch this player’s stats
+            PlayerStatsManager.PlayerStats stats =
+                    PlayerStatsManager.get().getStats(uuid);
+
+            // Build the action‐bar component
+            Component text = Component.literal(
+                    "Points: " + stats.getPoints() +
+                            "    XP: "     + stats.getXp()
+            );
+
+            // Send it as an action‐bar packet
+            player.connection.send(
+                    new ClientboundSetActionBarTextPacket(text)
+            );
+        }
+
+
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            PlayerStatsManager.PlayerStats ps = PlayerStatsManager.get().getStats(player.getUUID());
+            Component bar = Component.literal("Points: " + ps.getPoints() + "  XP: " + ps.getXp());
+            player.connection.send(new ClientboundSetActionBarTextPacket(bar));
         }
     }
 

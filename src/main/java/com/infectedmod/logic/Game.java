@@ -142,6 +142,7 @@ public class Game {
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
+
         if (event.phase != TickEvent.Phase.END) return;
         Game game = Game.get();
         MinecraftServer server = event.getServer();
@@ -169,8 +170,8 @@ public class Game {
             if (game.tickCounter % SURVIVOR_POINT_INTERVAL == 0) {
                 game.awardSurvivorRewards(server);
             }
-            if (game.getSurvivors().size() >= 1 && game.getInfected().isEmpty()) {
-                reInfectFirstPlayer(server);
+            if (!game.getSurvivors().isEmpty() && game.getInfected().isEmpty()) {
+                game.reInfectFirstPlayer(server);
             }
             // Check end conditions
             if (game.tickCounter >= GAME_TICKS) {
@@ -182,25 +183,6 @@ public class Game {
 
 
 
-        // Inside your server‐tick loop (e.g. onServerTick in Game.java):
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            UUID uuid = player.getUUID();
-
-            // Fetch this player’s stats
-            PlayerStatsManager.PlayerStats stats =
-                    PlayerStatsManager.get().getStats(uuid);
-
-            // Build the action‐bar component
-            Component text = Component.literal(
-                    "Points: " + stats.getPoints() +
-                            "    XP: "     + stats.getXp()
-            );
-
-            // Send it as an action‐bar packet
-            player.connection.send(
-                    new ClientboundSetActionBarTextPacket(text)
-            );
-        }
 
         if (game.running) {
             for (UUID infId : new HashSet<>(game.getInfected())) {
@@ -222,18 +204,16 @@ public class Game {
             }
         }
 
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            PlayerStatsManager.PlayerStats ps = PlayerStatsManager.get().getStats(player.getUUID());
-            Component bar = Component.literal("Points: " + ps.getPoints() + "  XP: " + ps.getXp());
-            player.connection.send(new ClientboundSetActionBarTextPacket(bar));
-        }
+
+
+
     }
 
     private static void clearPreviousData(MinecraftServer server) {
 
     }
 
-    public static void reInfectFirstPlayer(MinecraftServer server){
+    public void reInfectFirstPlayer(MinecraftServer server){
         Game game = Game.get();
         List<UUID> list = new ArrayList<>(game.getSurvivors());
         if (!list.isEmpty()) {
@@ -379,6 +359,24 @@ public class Game {
         PlayerStatsManager.get().save();
     }
 
+    public void stopGame(MinecraftServer server) {
+        survivors.clear();
+        infected.clear();
+        stats.clear();
+        sb     = server.overworld().getScoreboard();
+        sTeam  = sb.getPlayersTeam("Survivors");
+        iTeam  = sb.getPlayersTeam("Infected");
+        PlayerList list = server.getPlayerList();
+        // Add all online players as survivors
+        list.getPlayers().forEach(p -> {
+            survivors.add(p.getUUID());
+            stats.put(p.getUUID(), new PlayerStats());
+        });
+
+        running      = false;
+        tickCounter  = 0;
+    }
+
     private void endGame(boolean survivorsWin, MinecraftServer server) {
         running = false;
         String winner = survivorsWin ? "Survivors" : "Infected";
@@ -474,7 +472,9 @@ public class Game {
     public boolean isPostGamePhase() {
         return postGamePhase;
     }
-
+    public void setNextMap(MapManager.MapData md) {
+        nextMap = md;
+    }
     public MapManager.MapData getNextMap() {
         return nextMap;
     }

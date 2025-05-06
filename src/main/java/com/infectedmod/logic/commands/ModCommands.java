@@ -30,7 +30,7 @@ public class ModCommands {
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
 
-        dispatcher.register(literal("startRound")
+        dispatcher.register(literal("startGame")
                 .requires(source -> source.hasPermission(4))
                 .executes(ctx -> {
                     CommandSourceStack src = ctx.getSource();
@@ -41,6 +41,42 @@ public class ModCommands {
                 })
         );
 
+
+        dispatcher.register(literal("endGame")
+                .requires(source -> source.hasPermission(4))
+                .executes(ctx -> {
+                    CommandSourceStack src = ctx.getSource();
+                    MinecraftServer server = src.getServer();
+                    Game.get().stopGame(server);
+                    src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
+                    return 1;
+                })
+        );
+
+
+        dispatcher.register(literal("nextMap")
+                .requires(src -> src.hasPermission(2))
+                .then(argument("name", StringArgumentType.word())
+                        .executes(ctx -> {
+                            String name = StringArgumentType.getString(ctx, "name");
+                            MapManager mm = MapManager.get();
+                            Game game = Game.get();
+                            if (mm.hasMap(name) && (game.isRunning() || game.isIntermission())) {
+                                game.setNextMap(mm.getMap(name));
+                                ctx.getSource().sendSuccess( () ->
+                                                Component.literal("§aNext map was set to '" + name + "'."),
+                                        false
+                                );
+                            } else {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§cMap '" + name + "' already exists.")
+                                );
+
+                            }
+                            return 1;
+                        })
+                )
+        );
 
         dispatcher.register(literal("addMap")
                 .requires(src -> src.hasPermission(2))

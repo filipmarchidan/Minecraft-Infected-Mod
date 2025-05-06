@@ -124,6 +124,10 @@ public class MapManager {
         return Optional.of(list.get(random.nextInt(list.size())));
     }
 
+    public MapData getMap(String name) {
+        return maps.get(name);
+    }
+
     private static BlockPos parsePos(JsonObject o) {
         int x = o.get("x").getAsInt();
         int y = o.get("y").getAsInt();
