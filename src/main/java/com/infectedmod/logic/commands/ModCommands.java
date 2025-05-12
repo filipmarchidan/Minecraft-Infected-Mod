@@ -32,39 +32,6 @@ public class ModCommands {
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
 
-        dispatcher.register(literal("startGame")
-                .requires(source -> source.hasPermission(4))
-
-                .executes(ctx -> {
-                    CommandSourceStack src = ctx.getSource();
-                    MinecraftServer server = src.getServer();
-                    UUID playerId = Objects.requireNonNull(ctx.getSource().getPlayer()).getUUID();
-                    Game game = SessionManager.get().getGameOfPlayer(playerId);
-                    if(game == null) {
-                        SessionManager.get().joinSession(playerId);
-                    }
-                    game.startIntermission(server);
-                    src.sendSuccess(() -> Component.literal("Intermission started on default session " + game.getSessionId() + "."), true);
-                    return 1;
-                })
-
-                .then(argument("id",    IntegerArgumentType.integer(0)))
-                .executes(ctx -> {
-                    CommandSourceStack src = ctx.getSource();
-                    MinecraftServer server = src.getServer();
-
-
-                    int id = IntegerArgumentType.getInteger(ctx, "id");
-                    Game gameId = SessionManager.get().getGame(id);
-                    if(gameId == null) {
-                        SessionManager.get().createSession(id);
-                    }
-                    gameId.startIntermission(server);
-
-                    src.sendSuccess(() -> Component.literal("Intermission started on session " + gameId + "."), true);
-                    return 2;
-                })
-        );
 
 
         dispatcher.register(literal("endGame")
@@ -73,17 +40,20 @@ public class ModCommands {
                     CommandSourceStack src = ctx.getSource();
                     MinecraftServer server = src.getServer();
                     SessionManager sessionManager = SessionManager.get();
-                    Game game = sessionManager.getGameOfPlayer((Objects.requireNonNull(ctx.getSource().getPlayer()).getUUID()));
+                    UUID playerUUID = Objects.requireNonNull(src.getPlayer()).getUUID();
+                    Game game = sessionManager.getGameOfPlayer(playerUUID);
                     if(game == null) {ctx.getSource().sendFailure(
                             Component.literal("§cGame is not running!.")
                     );}
-                    assert game != null;
-                    for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
-                        game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
-                        sessionManager.leaveSession(playerId);
+                    else{
+                        for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
+                            game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
+                            sessionManager.leaveSession(playerId);
+                            sessionManager.getSessions().remove(game.getSessionId());
+                        }
+                        game.stopGame(server);
+                        src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
                     }
-                    game.stopGame(server);
-                    src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
                     return 1;
                 })
 
@@ -97,10 +67,10 @@ public class ModCommands {
                     if(game == null) {ctx.getSource().sendFailure(
                             Component.literal("§cGame is not running!.")
                     );}
-                    assert game != null;
                     for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
                         game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
                         sessionManager.leaveSession(playerId);
+                        sessionManager.getSessions().remove(game.getSessionId());
                     }
                     game.stopGame(server);
                     src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
@@ -144,6 +114,21 @@ public class ModCommands {
                             false
                     );
                     return game.getSessionId();
+                })
+                .then(argument("id",    IntegerArgumentType.integer(0)))
+                .executes(ctx -> {
+                    CommandSourceStack src = ctx.getSource();
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    MinecraftServer server = src.getServer();
+                    int id = IntegerArgumentType.getInteger(ctx, "id");
+                    SessionManager sessionManager = SessionManager.get();
+                    Game game = sessionManager.getGame(id);
+                    sessionManager.joinSessionById(p.getUUID(), id);
+                    ctx.getSource().sendSuccess( () ->
+                                    Component.literal("Joined session #" + game.getSessionId()),
+                            false
+                    );
+                    return 2;
                 })
         );
 

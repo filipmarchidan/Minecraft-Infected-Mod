@@ -32,6 +32,7 @@ public class SessionManager {
         GameSession s = new GameSession(id);
         sessions.add(s);
         games.put(id, new Game(id, server));
+        games.get(id).startIntermission(server);
         // In SessionManager, after creating Game:
 // each session gets its own Game
         return s;
@@ -55,6 +56,27 @@ public class SessionManager {
         GameSession s = createSession(newId);
         s.addPlayer(playerId);
         return games.get(newId);
+    }
+
+
+    public Game joinSessionById(UUID playerId, int id) {
+        // 1) find existing session
+        for (GameSession s : sessions) {
+            if (s.hasPlayer(playerId)) return games.get(s.getSessionId());
+        }
+        if(id > 0 && sessions.get(id) == null) {
+            GameSession s = createSession(id);
+            s.addPlayer(playerId);
+            return games.get(id);
+        }
+        for (GameSession s : sessions) {
+            if (s.getSessionId() == id && !s.isFull()) {
+                s.addPlayer(playerId);
+                return games.get(s.getSessionId());
+            }
+        }
+
+        return  null;
     }
 
     public void leaveSession(UUID playerId) {
