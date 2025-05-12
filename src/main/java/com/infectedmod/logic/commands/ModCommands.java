@@ -142,11 +142,6 @@ public class ModCommands {
                                             ServerPlayer p       = src.getPlayerOrException();
                                             int id               = IntegerArgumentType.getInteger(ctx, "id");
                                             SessionManager mgr   = SessionManager.get();
-                                            Game game            = mgr.getGame(id);
-                                            if (game == null) {
-                                                src.sendFailure(Component.literal("§cSession #" + id + " does not exist."));
-                                                return 0;
-                                            }
                                             mgr.joinSessionById(p.getUUID(), id);
                                             src.sendSuccess(
                                                     () -> Component.literal("Joined session #" + id),
