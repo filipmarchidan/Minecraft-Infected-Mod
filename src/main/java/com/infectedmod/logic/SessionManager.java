@@ -11,13 +11,12 @@ public class SessionManager {
     private MinecraftServer server;
 
     private SessionManager() {
-        createSession(1);
+
     }
 
 
     private SessionManager(MinecraftServer server) {
         this.server = server;
-        createSession(1);
     }
 
     public static void init(MinecraftServer server) {

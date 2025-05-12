@@ -27,10 +27,10 @@ import java.util.UUID;
 
 import java.util.*;
 
-@Mod.EventBusSubscriber(
-        modid = InfectedMod.MODID,
-        bus   = Mod.EventBusSubscriber.Bus.FORGE
-)
+//@Mod.EventBusSubscriber(
+//        modid = InfectedMod.MODID,
+//        bus   = Mod.EventBusSubscriber.Bus.FORGE
+//)
 public class Game {
     private static final int INTERMISSION_TICKS    = 30 * 10;
     public static final int GAME_TICKS           = 10 * 60 * 20;
@@ -152,9 +152,10 @@ public class Game {
 
     }
 
-    @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
 
+    public void handleTick(TickEvent.ServerTickEvent event) {
+        // all of your old onServerTick logic,
+        // but using this.intermission, this.running, etc.
         if (event.phase != TickEvent.Phase.END) return;
         Game game = SessionManager.get().getGame(sessionId);
         MinecraftServer server = event.getServer();
@@ -215,11 +216,13 @@ public class Game {
                 }
             }
         }
-
-
-
-
     }
+
+
+//    @SubscribeEvent
+//    public static void onServerTick(TickEvent.ServerTickEvent event) {
+//
+//    }
 
     private static void clearPreviousData(MinecraftServer server) {
 

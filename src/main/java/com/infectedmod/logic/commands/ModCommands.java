@@ -16,9 +16,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -34,49 +32,68 @@ public class ModCommands {
 
 
 
-        dispatcher.register(literal("endGame")
-                .requires(source -> source.hasPermission(4))
-                .executes(ctx -> {
-                    CommandSourceStack src = ctx.getSource();
-                    MinecraftServer server = src.getServer();
-                    SessionManager sessionManager = SessionManager.get();
-                    UUID playerUUID = Objects.requireNonNull(src.getPlayer()).getUUID();
-                    Game game = sessionManager.getGameOfPlayer(playerUUID);
-                    if(game == null) {ctx.getSource().sendFailure(
-                            Component.literal("§cGame is not running!.")
-                    );}
-                    else{
-                        for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
-                            game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
-                            sessionManager.leaveSession(playerId);
-                            sessionManager.getSessions().remove(game.getSessionId());
-                        }
-                        game.stopGame(server);
-                        src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
-                    }
-                    return 1;
-                })
-
-                .then(argument("id",    IntegerArgumentType.integer(0)))
-                .executes(ctx -> {
-                    CommandSourceStack src = ctx.getSource();
-                    MinecraftServer server = src.getServer();
-                    int id = IntegerArgumentType.getInteger(ctx, "id");
-                    SessionManager sessionManager = SessionManager.get();
-                    Game game = sessionManager.getGame(id);
-                    if(game == null) {ctx.getSource().sendFailure(
-                            Component.literal("§cGame is not running!.")
-                    );}
-                    for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
-                        game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
-                        sessionManager.leaveSession(playerId);
-                        sessionManager.getSessions().remove(game.getSessionId());
-                    }
-                    game.stopGame(server);
-                    src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
-                    return 2;
-                })
+        dispatcher.register(
+                literal("endGame")
+                        .requires(src -> src.hasPermission(4))
+                        // ——— no-arg version: end *your* current session ———
+                        .executes(ctx -> {
+                            CommandSourceStack src = ctx.getSource();
+                            ServerPlayer executor = src.getPlayerOrException();
+                            SessionManager mgr = SessionManager.get();
+                            Game game = mgr.getGameOfPlayer(executor.getUUID());
+                            if (game == null) {
+                                src.sendFailure(Component.literal("§cYou are not in a running game!"));
+                                return 0;
+                            }
+                            // Broadcast & tear down
+                            game.broadcastToSession("§cHost has ended this game. Use /joinGame to rejoin.");
+                            // Remove all players from that session
+                            GameSession session = mgr.getSessions().stream()
+                                    .filter(s -> s.getSessionId() == game.getSessionId())
+                                    .findFirst().orElse(null);
+                            if (session != null) {
+                                // copy to avoid concurrent-mod
+                                List<UUID> players = new ArrayList<>(session.getPlayers());
+                                for (UUID pid : players) {
+                                    mgr.leaveSession(pid);
+                                }
+                                mgr.getSessions().remove(session);
+                            }
+                            game.stopGame(src.getServer());
+                            src.sendSuccess(() -> Component.literal("§aYour game has been stopped"), true);
+                            return 1;
+                        })
+                        // ——— with “id” argument: end session #id ———
+                        .then(
+                                argument("id", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> {
+                                            CommandSourceStack src = ctx.getSource();
+                                            int id = IntegerArgumentType.getInteger(ctx, "id");
+                                            SessionManager mgr = SessionManager.get();
+                                            Game game = mgr.getGame(id);
+                                            if (game == null) {
+                                                src.sendFailure(Component.literal("§cNo running game with id " + id));
+                                                return 0;
+                                            }
+                                            game.broadcastToSession("§cHost has ended game #" + id + ". Use /joinGame to rejoin.");
+                                            // tear down that session
+                                            GameSession session = mgr.getSessions().stream()
+                                                    .filter(s -> s.getSessionId() == id)
+                                                    .findFirst().orElse(null);
+                                            if (session != null) {
+                                                List<UUID> players = new ArrayList<>(session.getPlayers());
+                                                for (UUID pid : players) {
+                                                    mgr.leaveSession(pid);
+                                                }
+                                                mgr.getSessions().remove(session);
+                                            }
+                                            game.stopGame(src.getServer());
+                                            src.sendSuccess(() -> Component.literal("§aGame #" + id + " has been stopped"), true);
+                                            return 1;
+                                        })
+                        )
         );
+
 
 
         dispatcher.register(literal("setNextMap")
@@ -104,33 +121,42 @@ public class ModCommands {
         );
 
 
-        dispatcher.register(literal("joinGame")
-                .requires(src -> src.getEntity() instanceof ServerPlayer)
-                .executes(ctx -> {
-                    ServerPlayer p = ctx.getSource().getPlayerOrException();
-                    Game game = SessionManager.get().joinSession(p.getUUID());
-                    ctx.getSource().sendSuccess( () ->
-                            Component.literal("Joined session #" + game.getSessionId()),
-                            false
-                    );
-                    return game.getSessionId();
-                })
-                .then(argument("id",    IntegerArgumentType.integer(0)))
-                .executes(ctx -> {
-                    CommandSourceStack src = ctx.getSource();
-                    ServerPlayer p = ctx.getSource().getPlayerOrException();
-                    MinecraftServer server = src.getServer();
-                    int id = IntegerArgumentType.getInteger(ctx, "id");
-                    SessionManager sessionManager = SessionManager.get();
-                    Game game = sessionManager.getGame(id);
-                    sessionManager.joinSessionById(p.getUUID(), id);
-                    ctx.getSource().sendSuccess( () ->
-                                    Component.literal("Joined session #" + game.getSessionId()),
-                            false
-                    );
-                    return 2;
-                })
+        dispatcher.register(
+                literal("joinGame")
+                        .requires(src -> src.getEntity() instanceof ServerPlayer)
+                        // ——— no-arg version ———
+                        .executes(ctx -> {
+                            ServerPlayer p = ctx.getSource().getPlayerOrException();
+                            Game game = SessionManager.get().joinSession(p.getUUID());
+                            ctx.getSource().sendSuccess(
+                                    () -> Component.literal("Joined session #" + game.getSessionId()),
+                                    false
+                            );
+                            return 1;
+                        })
+                        // ——— with “id” argument ———
+                        .then(
+                                argument("id", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> {
+                                            CommandSourceStack src = ctx.getSource();
+                                            ServerPlayer p       = src.getPlayerOrException();
+                                            int id               = IntegerArgumentType.getInteger(ctx, "id");
+                                            SessionManager mgr   = SessionManager.get();
+                                            Game game            = mgr.getGame(id);
+                                            if (game == null) {
+                                                src.sendFailure(Component.literal("§cSession #" + id + " does not exist."));
+                                                return 0;
+                                            }
+                                            mgr.joinSessionById(p.getUUID(), id);
+                                            src.sendSuccess(
+                                                    () -> Component.literal("Joined session #" + id),
+                                                    false
+                                            );
+                                            return 1;
+                                        })
+                        )
         );
+
 
         dispatcher.register(literal("leaveGame")
                 .requires(src -> src.getEntity() instanceof ServerPlayer)
