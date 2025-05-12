@@ -10,6 +10,9 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.Objects;
+import java.util.UUID;
+
 @Mod.EventBusSubscriber(modid = InfectedMod.MODID)
 public class PlayerAreaEnforcer {
 
@@ -19,8 +22,10 @@ public class PlayerAreaEnforcer {
         if (event.phase != TickEvent.Phase.END || event.player.level().isClientSide()) return;
         if (!(event.player instanceof ServerPlayer player)) return;
 
-        Game game = Game.get();
-        if (!game.isRunning()) return;
+        Game game = SessionManager.get().getGameOfPlayer(player.getUUID());
+        if (game == null || !game.isRunning()) {
+            return;
+        }
 
         MapManager.MapData map = game.getCurrentMap();
         if (map == null) return;

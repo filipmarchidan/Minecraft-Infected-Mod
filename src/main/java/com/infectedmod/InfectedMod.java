@@ -140,10 +140,16 @@ package com.infectedmod;
 
 import com.infectedmod.logic.MapManager;
 import com.infectedmod.logic.PlayerStatsManager;
+import com.infectedmod.logic.SessionManager;
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.server.ServerLifecycleHooks;
 
 @Mod(InfectedMod.MODID)
 public class InfectedMod {
@@ -155,15 +161,28 @@ public class InfectedMod {
 
         // Register the common-setup listener
         modBus.addListener(this::onCommonSetup);
+        modBus.addListener(this::onLoadComplete);
+        MinecraftForge.EVENT_BUS.addListener(this::onServerStarted);
     }
 
     /** Called on FMLCommonSetupEvent (after registry events, but before world load) */
     private void onCommonSetup(final FMLCommonSetupEvent event) {
         // Defer work to the main thread
+
         event.enqueueWork(() -> {
             MapManager.get();
             PlayerStatsManager.get();
         });
+    }
+
+    private void onLoadComplete(FMLLoadCompleteEvent ev) {
+        MinecraftServer server = ((ServerLifecycleHooks.getCurrentServer()));
+        SessionManager.init(server);
+    }
+
+    private void onServerStarted(ServerStartedEvent ev) {
+        SessionManager.init(ev.getServer());
+        // optionally register or initialize your Game instances here
     }
 }
 

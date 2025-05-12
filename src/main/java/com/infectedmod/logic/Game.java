@@ -19,6 +19,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -26,7 +27,10 @@ import java.util.UUID;
 
 import java.util.*;
 
-@Mod.EventBusSubscriber(modid = InfectedMod.MODID)
+@Mod.EventBusSubscriber(
+        modid = InfectedMod.MODID,
+        bus   = Mod.EventBusSubscriber.Bus.FORGE
+)
 public class Game {
     private static final int INTERMISSION_TICKS    = 30 * 10;
     public static final int GAME_TICKS           = 10 * 60 * 20;
@@ -48,7 +52,10 @@ public class Game {
     private  final Set<UUID> infected  = new HashSet<>();
     private final Map<UUID, PlayerStats> stats = new HashMap<>();
     private MapManager.MapData currentMap;
+    private final MinecraftServer server;
 
+    private static int sessionId;
+    // … all your fields (survivors, infected, stats, etc.) …
 
 
     private int  tickCounter = 0;
@@ -59,12 +66,11 @@ public class Game {
     PlayerTeam iTeam;
     public boolean isRunning()        { return running; }
     public MapManager.MapData getCurrentMap()    { return currentMap; }
-    private Game() { }
-    public static Game get() {
-        if (instance == null) {
-            instance = new Game();
-        }
-        return instance;
+    public Game(int sessionId, MinecraftServer server) {
+        Game.sessionId = sessionId;
+        this.server    = server;
+        // Listen to ticks & respawns
+        //FMLJavaModLoadingContext.getModEventBus().register(this);
     }
     public Set<UUID> getSurvivors() { return survivors; }
     public Set<UUID> getInfected() { return infected; }
@@ -92,10 +98,16 @@ public class Game {
         tickCounter  = 0;
 
         // Broadcast to all players
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.connection.send(new ClientboundSystemChatPacket(Component.literal("Intermission started! Run and hide"), false));
+        // add all players in this session as survivors
+        GameSession session = SessionManager.get().getSessions().get(sessionId);
+        for (UUID id : session.getPlayers()) {
+            survivors.add(id);
+            stats.put(id, new PlayerStats());
         }
 
+        // broadcast
+        broadcastToSession("Intermission started! Run and hide");
+        // Pick nextMap if set, else random
         // 1) Grab a random map (Optional<MapData> → handle empty)
 
 
@@ -144,7 +156,7 @@ public class Game {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
 
         if (event.phase != TickEvent.Phase.END) return;
-        Game game = Game.get();
+        Game game = SessionManager.get().getGame(sessionId);
         MinecraftServer server = event.getServer();
 
         if (game.intermission) {
@@ -213,8 +225,9 @@ public class Game {
 
     }
 
-    public void reInfectFirstPlayer(MinecraftServer server){
-        Game game = Game.get();
+
+    public static void reInfectFirstPlayer(MinecraftServer server){
+        Game game = SessionManager.get().getGame(sessionId);;
         List<UUID> list = new ArrayList<>(game.getSurvivors());
         if (!list.isEmpty()) {
             UUID firstId = list.get(new Random().nextInt(list.size()));
@@ -304,7 +317,7 @@ public class Game {
 
     @SubscribeEvent
     public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
-        Game game = Game.get();
+        Game game = SessionManager.get().getGame(sessionId);
         if (!game.running) return;
 
         ServerPlayer player = (ServerPlayer) event.getEntity();
@@ -332,12 +345,12 @@ public class Game {
         sb.removePlayerFromTeam(target.getScoreboardName());
         sb.addPlayerToTeam(target.getScoreboardName(), iTeam);
 
-        if (by != null) {
+
             PlayerStats ps = stats.get(by.getUUID());
             ps.addPoints(INFECT_POINT);
             ps.addXp(INFECT_XP);
             PlayerStatsManager.get().save();
-        }
+
         // TODO: teleport newly infected to map spawn
     }
 
@@ -436,7 +449,7 @@ public class Game {
     @SubscribeEvent
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent ev) {
         if (!(ev.getEntity() instanceof ServerPlayer player)) return;
-        Game game = Game.get();
+        Game game = SessionManager.get().getGame(sessionId);
         if (!game.isRunning()) return;
 
         UUID id = player.getUUID();
@@ -453,6 +466,18 @@ public class Game {
             player.sendSystemMessage(
                     Component.literal("You rejoined as a survivor.")
             );
+        }
+    }
+
+
+    /** Helper to broadcast to this session only **/
+    public void broadcastToSession(String msg) {
+        GameSession session = SessionManager.get().getSessions().get(sessionId);
+        for (UUID id : session.getPlayers()) {
+            ServerPlayer p = server.getPlayerList().getPlayer(id);
+            if (p != null) {
+                p.sendSystemMessage(Component.literal("[S"+sessionId+"] "+msg));
+            }
         }
     }
 
@@ -506,4 +531,13 @@ public class Game {
     public PlayerTeam getiTeam() {
         return iTeam;
     }
+
+    public int getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(int sessionId) {
+        this.sessionId = sessionId;
+    }
+
 }

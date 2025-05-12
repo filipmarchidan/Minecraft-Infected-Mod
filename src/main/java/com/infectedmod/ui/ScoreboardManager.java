@@ -3,6 +3,7 @@ package com.infectedmod.ui;
 import com.infectedmod.InfectedMod;
 import com.infectedmod.logic.Game;
 import com.infectedmod.logic.PlayerStatsManager;
+import com.infectedmod.logic.SessionManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
@@ -20,7 +21,7 @@ import net.minecraftforge.fml.common.Mod;
 
 import java.util.*;
 
-@Mod.EventBusSubscriber(modid = InfectedMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.DEDICATED_SERVER)
+@Mod.EventBusSubscriber(modid = InfectedMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ScoreboardManager {
     private static final String OBJ_NAME      = "InfectedHUD";
     private static final Component OBJ_TITLE = Component.literal("Infected Mod");
@@ -121,66 +122,67 @@ public class ScoreboardManager {
     public static void onServerTick(TickEvent.ServerTickEvent ev) {
         if (ev.phase != TickEvent.Phase.END) return;
         MinecraftServer server = ev.getServer();
-        Game game = Game.get();
+
 
         Scoreboard sb = server.overworld().getScoreboard();
-
-        // Reassign teams
-        sb.getTeamNames().forEach(name -> {
-            PlayerTeam team = sb.getPlayersTeam(name);
-            if (team != null) {
-                Set<String> playersInTeam = new HashSet<>(team.getPlayers());
-                for (String player : playersInTeam) {
-                    if (team.getPlayers().contains(player)) {
-                        sb.removePlayerFromTeam(player, team);
+        for (Game game: SessionManager.get().getAllGames()) {
+            // Reassign teams
+            sb.getTeamNames().forEach(name -> {
+                PlayerTeam team = sb.getPlayersTeam(name);
+                if (team != null) {
+                    Set<String> playersInTeam = new HashSet<>(team.getPlayers());
+                    for (String player : playersInTeam) {
+                        if (team.getPlayers().contains(player)) {
+                            sb.removePlayerFromTeam(player, team);
+                        }
                     }
                 }
-            }
-        });
+            });
 
 
-        for (UUID id : game.getSurvivors()) {
-            ServerPlayer p = server.getPlayerList().getPlayer(id);
-            if (p != null) sb.addPlayerToTeam(p.getScoreboardName(), survivorsTeam);
-        }
-
-        for (UUID id : game.getInfected()) {
-            ServerPlayer p = server.getPlayerList().getPlayer(id);
-            if (p != null) sb.addPlayerToTeam(p.getScoreboardName(), infectedTeam);
-        }
-
-
-
-        for (String entry : sb.getObjectiveNames()) {
-            sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(entry), sidebarObj);
-
-        }
-//        }
-        if(game.isRunning() || game.isIntermission()) {
-            for (String key : oldScoreKeys) {
-                sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
-            }
-            oldScoreKeys.clear();
-
-            Map<String, Integer> lines = new LinkedHashMap<>();
-
-            lines.put("Survivors: " + game.getSurvivors().size(), 3);
-            lines.put("Infected:  " + game.getInfected().size(), 2);
-            long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
-            String time = String.format("%02d:%02d", (ticksLeft / 20) / 60, (ticksLeft / 20) % 60);
-            String timeLabel = game.isIntermission() ? "Intermission" : "Time";
-            lines.put(timeLabel + ": " + time, 1);
-            for (String key : oldScoreKeys) {
-                sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
-            }
-            oldScoreKeys.clear();
-
-            for (Map.Entry<String, Integer> entry : lines.entrySet()) {
-                sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(entry.getKey()), sidebarObj)
-                        .set(entry.getValue());
-                oldScoreKeys.add(entry.getKey());
+            for (UUID id : game.getSurvivors()) {
+                ServerPlayer p = server.getPlayerList().getPlayer(id);
+                if (p != null) sb.addPlayerToTeam(p.getScoreboardName(), survivorsTeam);
             }
 
+            for (UUID id : game.getInfected()) {
+                ServerPlayer p = server.getPlayerList().getPlayer(id);
+                if (p != null) sb.addPlayerToTeam(p.getScoreboardName(), infectedTeam);
+            }
+
+
+            for (String entry : sb.getObjectiveNames()) {
+                sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(entry), sidebarObj);
+
+            }
+
+
+            if (game.isRunning() || game.isIntermission()) {
+                for (String key : oldScoreKeys) {
+                    sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
+                }
+                oldScoreKeys.clear();
+
+                Map<String, Integer> lines = new LinkedHashMap<>();
+
+                lines.put("Survivors: " + game.getSurvivors().size(), 3);
+                lines.put("Infected:  " + game.getInfected().size(), 2);
+                long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
+                String time = String.format("%02d:%02d", (ticksLeft / 20) / 60, (ticksLeft / 20) % 60);
+                String timeLabel = game.isIntermission() ? "Intermission" : "Time";
+                lines.put(timeLabel + ": " + time, 1);
+                for (String key : oldScoreKeys) {
+                    sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
+                }
+                oldScoreKeys.clear();
+
+                for (Map.Entry<String, Integer> entry : lines.entrySet()) {
+                    sb.getOrCreatePlayerScore(ScoreHolder.forNameOnly(entry.getKey()), sidebarObj)
+                            .set(entry.getValue());
+                    oldScoreKeys.add(entry.getKey());
+                }
+
+            }
         }
 
         // Inside your server‐tick loop (e.g. onServerTick in Game.java):

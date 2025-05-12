@@ -2,9 +2,7 @@ package com.infectedmod.logic.commands;
 
 
 import com.infectedmod.InfectedMod;
-import com.infectedmod.logic.Game;
-import com.infectedmod.logic.MapManager;
-import com.infectedmod.logic.PlayerStatsManager;
+import com.infectedmod.logic.*;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -17,6 +15,10 @@ import net.minecraft.server.players.PlayerList;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -32,12 +34,35 @@ public class ModCommands {
 
         dispatcher.register(literal("startGame")
                 .requires(source -> source.hasPermission(4))
+
                 .executes(ctx -> {
                     CommandSourceStack src = ctx.getSource();
                     MinecraftServer server = src.getServer();
-                    Game.get().startIntermission(server);
-                    src.sendSuccess(() -> Component.literal("Intermission started."), true);
+                    UUID playerId = Objects.requireNonNull(ctx.getSource().getPlayer()).getUUID();
+                    Game game = SessionManager.get().getGameOfPlayer(playerId);
+                    if(game == null) {
+                        SessionManager.get().joinSession(playerId);
+                    }
+                    game.startIntermission(server);
+                    src.sendSuccess(() -> Component.literal("Intermission started on default session " + game.getSessionId() + "."), true);
                     return 1;
+                })
+
+                .then(argument("id",    IntegerArgumentType.integer(0)))
+                .executes(ctx -> {
+                    CommandSourceStack src = ctx.getSource();
+                    MinecraftServer server = src.getServer();
+
+
+                    int id = IntegerArgumentType.getInteger(ctx, "id");
+                    Game gameId = SessionManager.get().getGame(id);
+                    if(gameId == null) {
+                        SessionManager.get().createSession(id);
+                    }
+                    gameId.startIntermission(server);
+
+                    src.sendSuccess(() -> Component.literal("Intermission started on session " + gameId + "."), true);
+                    return 2;
                 })
         );
 
@@ -47,21 +72,51 @@ public class ModCommands {
                 .executes(ctx -> {
                     CommandSourceStack src = ctx.getSource();
                     MinecraftServer server = src.getServer();
-                    Game.get().stopGame(server);
+                    SessionManager sessionManager = SessionManager.get();
+                    Game game = sessionManager.getGameOfPlayer((Objects.requireNonNull(ctx.getSource().getPlayer()).getUUID()));
+                    if(game == null) {ctx.getSource().sendFailure(
+                            Component.literal("§cGame is not running!.")
+                    );}
+                    assert game != null;
+                    for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
+                        game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
+                        sessionManager.leaveSession(playerId);
+                    }
+                    game.stopGame(server);
                     src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
                     return 1;
+                })
+
+                .then(argument("id",    IntegerArgumentType.integer(0)))
+                .executes(ctx -> {
+                    CommandSourceStack src = ctx.getSource();
+                    MinecraftServer server = src.getServer();
+                    int id = IntegerArgumentType.getInteger(ctx, "id");
+                    SessionManager sessionManager = SessionManager.get();
+                    Game game = sessionManager.getGame(id);
+                    if(game == null) {ctx.getSource().sendFailure(
+                            Component.literal("§cGame is not running!.")
+                    );}
+                    assert game != null;
+                    for(UUID playerId: sessionManager.getSessions().get(game.getSessionId()).getPlayers()){
+                        game.broadcastToSession("§cHost has ended this game. Use /joinGame to join another game.");
+                        sessionManager.leaveSession(playerId);
+                    }
+                    game.stopGame(server);
+                    src.sendSuccess(() -> Component.literal("The Game has been stopped"), true);
+                    return 2;
                 })
         );
 
 
-        dispatcher.register(literal("nextMap")
-                .requires(src -> src.hasPermission(2))
+        dispatcher.register(literal("setNextMap")
+                .requires(src -> src.hasPermission(4))
                 .then(argument("name", StringArgumentType.word())
                         .executes(ctx -> {
                             String name = StringArgumentType.getString(ctx, "name");
                             MapManager mm = MapManager.get();
-                            Game game = Game.get();
-                            if (mm.hasMap(name) && (game.isRunning() || game.isIntermission())) {
+                            Game game = SessionManager.get().getGameOfPlayer(UUID.fromString(Objects.requireNonNull(ctx.getSource().getPlayer()).getUUID().toString()));
+                            if (game != null && mm.hasMap(name) && (game.isRunning() || game.isIntermission())) {
                                 game.setNextMap(mm.getMap(name));
                                 ctx.getSource().sendSuccess( () ->
                                                 Component.literal("§aNext map was set to '" + name + "'."),
@@ -69,7 +124,7 @@ public class ModCommands {
                                 );
                             } else {
                                 ctx.getSource().sendFailure(
-                                        Component.literal("§cMap '" + name + "' already exists.")
+                                        Component.literal("§cMap '" + name + "' doesn't exist.")
                                 );
 
                             }
@@ -78,8 +133,60 @@ public class ModCommands {
                 )
         );
 
+
+        dispatcher.register(literal("joinGame")
+                .requires(src -> src.getEntity() instanceof ServerPlayer)
+                .executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    Game game = SessionManager.get().joinSession(p.getUUID());
+                    ctx.getSource().sendSuccess( () ->
+                            Component.literal("Joined session #" + game.getSessionId()),
+                            false
+                    );
+                    return game.getSessionId();
+                })
+        );
+
+        dispatcher.register(literal("leaveGame")
+                .requires(src -> src.getEntity() instanceof ServerPlayer)
+                .executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    SessionManager.get().leaveSession(p.getUUID());
+                    ctx.getSource().sendSuccess( () ->
+                            Component.literal("You left your session."),
+                            false
+                    );
+                    return 1;
+                })
+        );
+
+
+
+        dispatcher.register(literal("nextMap")
+                .requires(src -> src.hasPermission(1))
+                        .executes(ctx -> {
+
+                            MapManager mm = MapManager.get();
+                            Game game = SessionManager.get().getGameOfPlayer(UUID.fromString(Objects.requireNonNull(ctx.getSource().getPlayer()).getUUID().toString()));
+                            String name = game.getNextMap().name;
+                            if (game != null && mm.hasMap(name) && (game.isRunning() || game.isIntermission())) {
+                                ctx.getSource().sendSuccess( () ->
+                                                Component.literal("§aNext map is '" + name + "'."),
+                                        false
+                                );
+                            } else {
+                                ctx.getSource().sendFailure(
+                                        Component.literal("§cGame is not running '")
+                                );
+
+                            }
+                            return 1;
+                        })
+        );
+
+
         dispatcher.register(literal("addMap")
-                .requires(src -> src.hasPermission(2))
+                .requires(src -> src.hasPermission(4))
                 .then(argument("name", StringArgumentType.word())
                         .executes(ctx -> {
                             String name = StringArgumentType.getString(ctx, "name");
@@ -102,7 +209,7 @@ public class ModCommands {
 
 
         dispatcher.register(literal("givePoints")
-                .requires(src -> src.hasPermission(2))
+                .requires(src -> src.hasPermission(4))
                 .then(argument("playerName", StringArgumentType.word())
                         .then(argument("points", IntegerArgumentType.integer())
                                 .executes(ctx -> {
@@ -141,7 +248,7 @@ public class ModCommands {
 
 
         dispatcher.register(literal("giveXP")
-                .requires(src -> src.hasPermission(2))
+                .requires(src -> src.hasPermission(4))
                 .then(argument("playerName", StringArgumentType.word())
                         .then(argument("xp", IntegerArgumentType.integer())
                                 .executes(ctx -> {
