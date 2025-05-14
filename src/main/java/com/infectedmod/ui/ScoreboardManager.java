@@ -125,7 +125,7 @@ public class ScoreboardManager {
 
 
         Scoreboard sb = server.overworld().getScoreboard();
-        for (Game game: SessionManager.get().getAllGames()) {
+        for (Game game: SessionManager.get().getGames().values()) {
             // Reassign teams
             sb.getTeamNames().forEach(name -> {
                 PlayerTeam team = sb.getPlayersTeam(name);
@@ -162,15 +162,21 @@ public class ScoreboardManager {
                     sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
                 }
                 oldScoreKeys.clear();
-
+                int totalPlayers = (int) game.getInfected().size() + game.getSurvivors().size();
                 Map<String, Integer> lines = new LinkedHashMap<>();
-
-                lines.put("Survivors: " + game.getSurvivors().size(), 3);
-                lines.put("Infected:  " + game.getInfected().size(), 2);
+                lines.put("Players:  " + totalPlayers + "/30", 5);
+                lines.put("Survivors: " + game.getSurvivors().size(), 4);
+                lines.put("Infected:  " + game.getInfected().size(), 3);
                 long ticksLeft = Math.max(0, Game.GAME_TICKS - game.getTickCounter());
                 String time = String.format("%02d:%02d", (ticksLeft / 20) / 60, (ticksLeft / 20) % 60);
                 String timeLabel = game.isIntermission() ? "Intermission" : "Time";
-                lines.put(timeLabel + ": " + time, 1);
+
+                if(game.getCurrentMap() != null) {
+                    String currentMap = "Map:        " + game.getCurrentMap().name;
+                    lines.put(currentMap, 2);
+                    lines.put(timeLabel + ": " + time, 1);
+                }
+                else {lines.put(timeLabel + ": " + time, 1);}
                 for (String key : oldScoreKeys) {
                     sb.resetSinglePlayerScore(ScoreHolder.forNameOnly(key), sidebarObj);
                 }

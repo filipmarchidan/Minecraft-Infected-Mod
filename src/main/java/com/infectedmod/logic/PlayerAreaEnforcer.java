@@ -28,7 +28,7 @@ public class PlayerAreaEnforcer {
         Game game = SessionManager.get().getGameOfPlayer(id);
 
         if (game == null || !game.isRunning()){
-            System.out.println("Game is not running ");
+            //System.out.println("Game is not running ");
             return;
         }
 

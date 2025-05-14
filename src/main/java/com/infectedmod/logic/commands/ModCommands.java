@@ -42,14 +42,15 @@ public class ModCommands {
                             ServerPlayer executor = src.getPlayerOrException();
                             SessionManager mgr = SessionManager.get();
                             Game game = mgr.getGameOfPlayer(executor.getUUID());
+
                             if (game == null) {
                                 src.sendFailure(Component.literal("§cYou are not in a running game!"));
                                 return 0;
                             }
                             // Broadcast & tear down
-                            game.broadcastToSession("§cHost has ended this game. Use /joinGame to rejoin.");
+                            game.broadcastToSession("§cHost has ended this game. Use /joinGame to rejoin another session.");
                             // Remove all players from that session
-                            GameSession session = mgr.getSessions().stream()
+                            GameSession session = mgr.getSessions().values().stream()
                                     .filter(s -> s.getSessionId() == game.getSessionId())
                                     .findFirst().orElse(null);
                             if (session != null) {
@@ -58,7 +59,8 @@ public class ModCommands {
                                 for (UUID pid : players) {
                                     mgr.leaveSession(pid);
                                 }
-                                mgr.getSessions().remove(session);
+                                mgr.leaveSession(executor.getUUID());
+                                mgr.getSessions().remove(session.getSessionId(), session);
                             }
                             game.stopGame(src.getServer());
                             src.sendSuccess(() -> Component.literal("§aYour game has been stopped"), true);
@@ -72,13 +74,18 @@ public class ModCommands {
                                             int id = IntegerArgumentType.getInteger(ctx, "id");
                                             SessionManager mgr = SessionManager.get();
                                             Game game = mgr.getGame(id);
+                                            ServerPlayer executor = src.getPlayerOrException();
+                                            if (mgr.getSession(id) == null) {
+                                                src.sendFailure(Component.literal("§cNo running session " + id));
+                                                return 0;
+                                            }
                                             if (game == null) {
                                                 src.sendFailure(Component.literal("§cNo running game with id " + id));
                                                 return 0;
                                             }
-                                            game.broadcastToSession("§cHost has ended game #" + id + ". Use /joinGame to rejoin.");
+                                            game.broadcastToSession("§cHost has ended game #" + id + ". Use /joinGame to rejoin another session.");
                                             // tear down that session
-                                            GameSession session = mgr.getSessions().stream()
+                                            GameSession session = mgr.getSessions().values().stream()
                                                     .filter(s -> s.getSessionId() == id)
                                                     .findFirst().orElse(null);
                                             if (session != null) {
@@ -86,7 +93,8 @@ public class ModCommands {
                                                 for (UUID pid : players) {
                                                     mgr.leaveSession(pid);
                                                 }
-                                                mgr.getSessions().remove(session);
+                                                mgr.leaveSession(executor.getUUID());
+                                                mgr.getSessions().remove(session.getSessionId(), session);
                                             }
                                             game.stopGame(src.getServer());
                                             src.sendSuccess(() -> Component.literal("§aGame #" + id + " has been stopped"), true);
@@ -132,6 +140,13 @@ public class ModCommands {
                                 ServerPlayer player = ctx.getSource().getPlayerOrException();
                                 UUID id = player.getUUID();
                                 // join (or create) their session
+                                for(GameSession gameSession: SessionManager.get().getSessions().values()) {
+                                    if(gameSession.hasPlayer(id))
+                                    {
+                                        ctx.getSource().sendFailure(Component.literal("§cYou already are in a session use /leaveGame first"));
+                                        return 0;
+                                    }
+                                }
                                 Game game = SessionManager.get().joinSession(id);
                                 ctx.getSource().sendSuccess(() ->
                                         Component.literal("§aJoined session #" + game.getSessionId()), false);
@@ -159,10 +174,27 @@ public class ModCommands {
                                         int sessionId = IntegerArgumentType.getInteger(ctx, "id");
                                         SessionManager mgr = SessionManager.get();
                                         Game game = mgr.getGame(sessionId);
+                                        for(GameSession gameSession: SessionManager.get().getSessions().values()) {
+                                            if(gameSession.hasPlayer(player.getUUID()))
+                                            {
+                                                ctx.getSource().sendFailure(Component.literal("§cYou already are in a session use /leaveGame first"));
+                                                return 0;
+                                            }
+                                        }
                                         if (game == null) {
-                                            src.sendFailure(Component.literal("§cNo session #" + sessionId));
+                                            mgr.joinSessionById(player.getUUID(), sessionId);
+                                            Game game2 = mgr.getGame(sessionId);
+                                            if (!game2.isIntermission() && !game2.isRunning()) {
+                                                game2.startIntermission(src.getServer());
+                                            }
+                                            src.sendSuccess(() ->
+                                                    Component.literal("§c No session #" + sessionId + ",§a but a new one was created"), false);
                                             return 0;
                                         }
+
+                                        GameSession gameSession = mgr.getSession(sessionId);
+                                        if(gameSession.isFull()) ctx.getSource().sendFailure(Component.literal("§c This sessions is full"));
+
                                         mgr.joinSessionById(player.getUUID(), sessionId);
                                         src.sendSuccess(() ->
                                                 Component.literal("§aJoined session #" + sessionId), false);

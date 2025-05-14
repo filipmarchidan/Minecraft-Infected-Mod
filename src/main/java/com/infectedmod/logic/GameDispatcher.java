@@ -15,7 +15,7 @@ public class GameDispatcher {
     public static void onServerTick(TickEvent.ServerTickEvent ev) {
         if (ev.phase != TickEvent.Phase.END) return;
         // Forward the tick to every live session’s Game instance:
-        for (GameSession session : SessionManager.get().getSessions()) {
+        for (GameSession session : SessionManager.get().getSessions().values()) {
             Game game = SessionManager.get().getGame(session.getSessionId());
             if (game != null) {
                 game.handleTick(ev);  // an instance method you define
