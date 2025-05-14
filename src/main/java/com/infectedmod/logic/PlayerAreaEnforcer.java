@@ -19,18 +19,26 @@ public class PlayerAreaEnforcer {
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         // only run on server, end‐phase ticks
-        if (event.phase != TickEvent.Phase.END || event.player.level().isClientSide()) return;
-        if (!(event.player instanceof ServerPlayer player)) return;
+        if (event.phase != TickEvent.Phase.END || event.player.level().isClientSide) return;
 
-        Game game = SessionManager.get().getGameOfPlayer(player.getUUID());
-        if (game == null || !game.isRunning()) {
+        ServerPlayer player = (ServerPlayer)event.player;
+        UUID id = player.getUUID();
+
+        // 1) find which game this player is in
+        Game game = SessionManager.get().getGameOfPlayer(id);
+
+        if (game == null || !game.isRunning()){
+            System.out.println("Game is not running ");
             return;
         }
 
+        // 2) get that session's map area
         MapManager.MapData map = game.getCurrentMap();
         if (map == null) return;
 
+
         BlockPos here = player.blockPosition();
+        System.out.println("Game is running ");
         if (!inside(here, map.pos1, map.pos2)) {
             // teleport back to spawn
             BlockPos s = map.spawn;

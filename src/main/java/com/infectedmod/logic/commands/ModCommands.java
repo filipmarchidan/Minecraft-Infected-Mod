@@ -6,6 +6,7 @@ import com.infectedmod.logic.*;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -124,33 +125,63 @@ public class ModCommands {
         dispatcher.register(
                 literal("joinGame")
                         .requires(src -> src.getEntity() instanceof ServerPlayer)
-                        // ——— no-arg version ———
+
+                        // 1) No-arg form
                         .executes(ctx -> {
-                            ServerPlayer p = ctx.getSource().getPlayerOrException();
-                            Game game = SessionManager.get().joinSession(p.getUUID());
-                            ctx.getSource().sendSuccess(
-                                    () -> Component.literal("Joined session #" + game.getSessionId()),
-                                    false
-                            );
-                            return 1;
+                            try {
+                                ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                UUID id = player.getUUID();
+                                // join (or create) their session
+                                Game game = SessionManager.get().joinSession(id);
+                                ctx.getSource().sendSuccess(() ->
+                                        Component.literal("§aJoined session #" + game.getSessionId()), false);
+                                // ensure intermission (if nobody else)
+                                if (!game.isIntermission() && !game.isRunning()) {
+                                    game.startIntermission(ctx.getSource().getServer());
+                                }
+                                return game.getSessionId();
+                            } catch (CommandSyntaxException e) {
+                                ctx.getSource().sendFailure(Component.literal("§cError: " + e.getMessage()));
+                                return 0;
+                            } catch (Exception e) {
+                                e.printStackTrace(); // so you see the NPE or whatever in console
+                                ctx.getSource().sendFailure(Component.literal("§cAn unexpected error occurred"));
+                                return 0;
+                            }
                         })
-                        // ——— with “id” argument ———
-                        .then(
-                                argument("id", IntegerArgumentType.integer(1))
-                                        .executes(ctx -> {
-                                            CommandSourceStack src = ctx.getSource();
-                                            ServerPlayer p       = src.getPlayerOrException();
-                                            int id               = IntegerArgumentType.getInteger(ctx, "id");
-                                            SessionManager mgr   = SessionManager.get();
-                                            mgr.joinSessionById(p.getUUID(), id);
-                                            src.sendSuccess(
-                                                    () -> Component.literal("Joined session #" + id),
-                                                    false
-                                            );
-                                            return 1;
-                                        })
+
+                        // 2) “/joinGame <id>” form
+                        .then(argument("id", IntegerArgumentType.integer(1, Integer.MAX_VALUE))
+                                .executes(ctx -> {
+                                    try {
+                                        CommandSourceStack src = ctx.getSource();
+                                        ServerPlayer player = src.getPlayerOrException();
+                                        int sessionId = IntegerArgumentType.getInteger(ctx, "id");
+                                        SessionManager mgr = SessionManager.get();
+                                        Game game = mgr.getGame(sessionId);
+                                        if (game == null) {
+                                            src.sendFailure(Component.literal("§cNo session #" + sessionId));
+                                            return 0;
+                                        }
+                                        mgr.joinSessionById(player.getUUID(), sessionId);
+                                        src.sendSuccess(() ->
+                                                Component.literal("§aJoined session #" + sessionId), false);
+                                        if (!game.isIntermission() && !game.isRunning()) {
+                                            game.startIntermission(src.getServer());
+                                        }
+                                        return sessionId;
+                                    } catch (CommandSyntaxException e) {
+                                        ctx.getSource().sendFailure(Component.literal("§cError: " + e.getMessage()));
+                                        return 0;
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                        ctx.getSource().sendFailure(Component.literal("§cAn unexpected error occurred"));
+                                        return 0;
+                                    }
+                                })
                         )
         );
+
 
 
         dispatcher.register(literal("leaveGame")

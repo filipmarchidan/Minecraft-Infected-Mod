@@ -97,9 +97,17 @@ public class Game {
         running      = false;
         tickCounter  = 0;
 
-        // Broadcast to all players
-        // add all players in this session as survivors
-        GameSession session = SessionManager.get().getSessions().get(sessionId);
+        GameSession session = SessionManager.get().getSession(sessionId);
+        if (session == null) {
+            System.err.println("[InfectedMod] No session found with ID " + sessionId);
+            return;
+        }
+
+        int playerCount = session.getPlayers().size();
+        if (playerCount <= 1) {
+            System.out.println("Intermission Error: Not enough players to start. Size: " + playerCount);
+            return;
+        }
         for (UUID id : session.getPlayers()) {
             survivors.add(id);
             stats.put(id, new PlayerStats());

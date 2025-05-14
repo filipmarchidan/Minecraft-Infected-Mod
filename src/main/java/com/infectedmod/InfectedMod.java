@@ -156,13 +156,10 @@ public class InfectedMod {
     public static final String MODID = "infectedmod";
 
     public InfectedMod(final FMLJavaModLoadingContext context) {
-        // Grab the mod event bus (for lifecycle events)
         IEventBus modBus = context.getModEventBus();
-
-        // Register the common-setup listener
         modBus.addListener(this::onCommonSetup);
-        modBus.addListener(this::onLoadComplete);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStarted);
+
     }
 
     /** Called on FMLCommonSetupEvent (after registry events, but before world load) */
@@ -173,11 +170,6 @@ public class InfectedMod {
             MapManager.get();
             PlayerStatsManager.get();
         });
-    }
-
-    private void onLoadComplete(FMLLoadCompleteEvent ev) {
-        MinecraftServer server = ((ServerLifecycleHooks.getCurrentServer()));
-        SessionManager.init(server);
     }
 
     private void onServerStarted(ServerStartedEvent ev) {

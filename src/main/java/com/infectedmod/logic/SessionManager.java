@@ -10,28 +10,39 @@ public class SessionManager {
     private final Map<Integer, Game> games = new HashMap<>();
     private MinecraftServer server;
 
-    private SessionManager() {
-
-    }
-
 
     private SessionManager(MinecraftServer server) {
-        this.server = server;
+        this.server   = server;
+        // now you can safely create games:
+
     }
 
+    /** Must be called exactly once, after the server is up */
     public static void init(MinecraftServer server) {
-        if (instance == null) instance = new SessionManager(server);
+        if (instance != null) throw new IllegalStateException("Already initialized");
+        instance = new SessionManager(server);
+        instance.createSession(1);
     }
-    public static SessionManager get() {     if (instance == null) {
-        instance = new SessionManager();
+
+    public static SessionManager get() {
+        if (instance == null) {
+            throw new IllegalStateException("SessionManager.init(server) has not been called!");
+        }
+        return instance;
     }
-        return instance; }
+
+    /** Returns the GameSession for this ID, or null if not found. */
+    public GameSession getSession(int id) {
+        return sessions.get(id);
+    }
+
 
     public GameSession createSession(int id) {
         GameSession s = new GameSession(id);
         sessions.add(s);
         games.put(id, new Game(id, server));
-        games.get(id).startIntermission(server);
+        System.out.println("Created new session " + id + "game session" + games.get(id).getSessionId());
+       // games.get(id).startIntermission(server);
         // In SessionManager, after creating Game:
 // each session gets its own Game
         return s;
